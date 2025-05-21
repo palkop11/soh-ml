@@ -4,6 +4,8 @@ import torch
 import yaml
 from pathlib import Path
 
+from .data_splitting import get_subset_info
+
 class BatteryExperiment:
     def __init__(self, config):
         self.config = config
@@ -39,7 +41,7 @@ class BatteryExperiment:
 
     def prepare_datasets(self):
         # Train dataset
-        train_info = self.config['data']['train_info']
+        train_info = get_subset_info(self.config['data']['train'])
         self.train_ds = DataSetCreation(
             train_info,
             fit_normalization=True,
@@ -48,7 +50,7 @@ class BatteryExperiment:
         )
 
         # Validation dataset
-        val_info = self.config['data']['val_info']
+        val_info = get_subset_info(self.config['data']['val'])
         self.val_ds = DataSetCreation(
             val_info,
             normalize=self.train_ds.normalize,
@@ -57,7 +59,7 @@ class BatteryExperiment:
 
         # Test dataset (optional)
         if 'test_info' in self.config['data']:
-            test_info = self.config['data']['test_info']
+            test_info = get_subset_info(self.config['data']['test'])
             self.test_ds = DataSetCreation(
                 test_info,
                 normalize=self.train_ds.normalize,
