@@ -42,8 +42,8 @@ class BatteryExperiment:
     def prepare_datasets(self):
         # Train dataset
         train_info = get_subset_info(
-            name = self.config['data']['train'],
-            WRKDIR = self.config['data']['wrkdir']
+            names = self.config['data']['train'],
+            datadir = self.config['data']['datadir']
         )
         self.train_ds = DataSetCreation(
             train_info,
@@ -54,8 +54,8 @@ class BatteryExperiment:
 
         # Validation dataset
         val_info = get_subset_info(
-            name = self.config['data']['val'],
-            WRKDIR = self.config['data']['wrkdir']
+            names = self.config['data']['val'],
+            datadir = self.config['data']['datadir']
         )
         self.val_ds = DataSetCreation(
             val_info,
@@ -66,8 +66,8 @@ class BatteryExperiment:
         # Test dataset (optional)
         if 'test_info' in self.config['data']:
             test_info = get_subset_info(
-                name = self.config['data']['test'],
-                WRKDIR = self.config['data']['wrkdir']
+                names = self.config['data']['test'],
+                datadir = self.config['data']['datadir']
             )
             self.test_ds = DataSetCreation(
                 test_info,

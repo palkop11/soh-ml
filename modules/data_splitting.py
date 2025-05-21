@@ -50,17 +50,21 @@ TRAIN_VAL_TEST = {
             ],
     }
 
-def get_subset_info(name, WRKDIR):
-    info = make_batteries_info(WRKDIR)
+def get_subset_info(names, wrkdir):
+    info = make_batteries_info(wrkdir)
+    if isinstance(names, str):
+        match names:
+            case "blacklist":
+                return info.query('ID in @BLACKLIST')
+            case "small":
+                return info.query('ID in @SMALL_LIST')
+            case ["train", "val", "test"]:
+                id_in_info = TRAIN_VAL_TEST[names]
+                return info.query('ID in @id_in_info')
 
-    match name:
-        case "blacklist":
-            return info.query('ID in @BLACKLIST')
-        case "small":
-            return info.query('ID in @SMALL_LIST')
-        case ["train", "val", "test"]:
-            id_in_info = TRAIN_VAL_TEST[name]
-            return info.query('ID in @id_in_info')
+    # name is 
+    if isinstance(names, list):
+        return info.query('ID in @names') 
 
 if __name__ == '__main__':
 
