@@ -150,10 +150,28 @@ class BatteryExperiment:
         self.pipeline = self.create_pipeline()
         self.trainer = self.create_trainer()
 
-        # Training
-        self.trainer.fit(self.pipeline, datamodule=self.datamodule)
+        # Checkpoint path (specify in config or auto-detect latest)
+        ckpt_path = self.config.get('resume_ckpt', None)
+        if ckpt_path == 'auto':
+            # Find latest checkpoint in checkpoint_dir
+            checkpoints = list(self.checkpoint_dir.glob('*.ckpt'))
+            if checkpoints:
+                ckpt_path = max(checkpoints, key=lambda x: x.stat().st_ctime)
+            else:
+                ckpt_path = None
+        elif ckpt_path:
+            ckpt_path = Path(ckpt_path)
+            if not ckpt_path.exists():
+                raise FileNotFoundError(f"Checkpoint {ckpt_path} not found!")
 
-        # Testing
+        # Training (resumes from checkpoint if provided)
+        self.trainer.fit(
+            self.pipeline, 
+            datamodule=self.datamodule, 
+            ckpt_path=str(ckpt_path) if ckpt_path else None
+        )
+
+        # Testing (unchanged)
         if hasattr(self.datamodule, 'test_dataset'):
             test_results = self.trainer.test(datamodule=self.datamodule)
             return test_results

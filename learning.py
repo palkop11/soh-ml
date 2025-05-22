@@ -24,6 +24,8 @@ experiment_config = {
         'output_activation': 'sigmoid',
     },
 
+    'resume_ckpt': 'auto',
+    
     'training': {
         'batch_size': 8,
         'learning_rate': 1e-3,
