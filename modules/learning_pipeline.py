@@ -88,7 +88,7 @@ class BatteryPipeline(pl.LightningModule):
     def __init__(
         self,
         model,
-        denormalize_y=lambda y: y,
+        denormalize_y=nn.Identity(),
         loss_type='mse',  # 'mse', 'huber', 'bce'
         huber_delta=1.0,  # Only for huber loss
         learning_rate=1e-3,

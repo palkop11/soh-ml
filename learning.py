@@ -25,7 +25,7 @@ experiment_config = {
     },
 
     'resume_ckpt': 'auto',
-    'loss_type': 'bce',
+    'loss_type': 'huber',
     
     'training': {
         'batch_size': 8,

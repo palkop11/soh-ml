@@ -447,13 +447,40 @@ supported for \'normalization_types\' argument')
             )
         y_stats, y_bias, y_scale = y_stats_calculator.compute(dataset)
 
-        self.normalize['x'] = lambda x: (x - x_bias) / x_scale
-        self.normalize['y'] = lambda y: (y - y_bias) / y_scale
-        self.denormalize['x'] = lambda x: x * x_scale + x_bias
-        self.denormalize['y'] = lambda y: y * y_scale + y_bias
+        # Ensure tensors are on CPU for consistent behavior
+        x_bias = x_bias.cpu() if torch.is_tensor(x_bias) else torch.tensor(x_bias)
+        x_scale = x_scale.cpu() if torch.is_tensor(x_scale) else torch.tensor(x_scale)
+        y_bias = y_bias.cpu() if torch.is_tensor(y_bias) else torch.tensor(y_bias)
+        y_scale = y_scale.cpu() if torch.is_tensor(y_scale) else torch.tensor(y_scale)
+
+        # Handle minmax_symmetric case properly
+        if self.normalization_types['x'] == 'minmax_symmetric':
+            self.normalize['x'] = lambda x: (x - x_bias) / x_scale
+            self.denormalize['x'] = lambda x: x * x_scale + x_bias
+        else:
+            self.normalize['x'] = lambda x: (x - x_bias) / x_scale
+            self.denormalize['x'] = lambda x: x * x_scale + x_bias
+
+        if self.normalization_types['y'] == 'minmax_symmetric':
+            self.normalize['y'] = lambda y: (y - y_bias) / y_scale
+            self.denormalize['y'] = lambda y: y * y_scale + y_bias
+        else:
+            self.normalize['y'] = lambda y: (y - y_bias) / y_scale
+            self.denormalize['y'] = lambda y: y * y_scale + y_bias
 
         self.stats['x'] = x_stats
         self.stats['y'] = y_stats
+
+        # Test normalization round-trip
+        test_x = torch.randn(10, 2)
+        norm_x = self.normalize['x'](test_x)
+        denorm_x = self.denormalize['x'](norm_x)
+        assert torch.allclose(test_x, denorm_x, atol=1e-6), "X normalization round-trip failed"
+
+        test_y = torch.randn(1)
+        norm_y = self.normalize['y'](test_y)
+        denorm_y = self.denormalize['y'](norm_y)
+        assert torch.allclose(test_y, denorm_y, atol=1e-6), "Y normalization round-trip failed"
 
     def _create_main_dataset(self):
         if self.fit_normalization:
