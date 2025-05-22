@@ -1,110 +1,95 @@
-# ----------
-# LSTM model
-# ----------
+import torch.nn as nn
+import torch
 
-class LSTMModel(nn.Module):
-    def __init__(self, input_size=2, hidden_size=64, num_layers=2, output_size=1):
-        super().__init__()
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=False
-        )
-        self.regressor = nn.Linear(hidden_size, output_size)
-
-    def forward(self, x, lengths):
-        # Pack padded sequence
-        packed = nn.utils.rnn.pack_padded_sequence(
-            x, lengths.cpu(), batch_first=True, enforce_sorted=True
-        )
-        output, (h_n, c_n) = self.lstm(packed)
-
-        # Use last hidden state
-        last_hidden = h_n[-1]
-        return self.regressor(last_hidden).squeeze()
-
-# --------
-# CNN-LSTM
-# --------
-
-class CNNLSTMModel(nn.Module):
+class UnifiedBatteryModel(nn.Module):
     def __init__(self,
                  input_size=2,
-                 cnn_hidden=16,
+                 cnn_hidden_dim=16,
+                 cnn_channels=[4, 8, 16],
                  lstm_hidden_size=64,
                  num_layers=2,
                  output_size=1,
                  dropout_prob=0.25,
-                 output_activation = 'sigmoid'):
+                 regressor_hidden_dim=None,
+                 output_activation='sigmoid'):
         super().__init__()
+        self.use_cnn = cnn_hidden_dim is not None and cnn_hidden_dim > 0
+        self.cnn_channels = cnn_channels
+        self.compress_factor = 1
 
-        # CNN block
-        self.cnn = nn.Sequential(
-            nn.Conv1d(input_size, 4, kernel_size=5, stride=2, padding=2),
-            nn.BatchNorm1d(4),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2),
+        # CNN layers if enabled
+        if self.use_cnn:
+            cnn_layers = []
+            in_channels = input_size
+            for i, out_channels in enumerate(cnn_channels):
+                cnn_layers.extend([
+                    nn.Conv1d(in_channels, out_channels, kernel_size=5 if i == 0 else 3, stride=2, padding=2 if i == 0 else 1),
+                    nn.BatchNorm1d(out_channels),
+                    nn.ReLU(),
+                    nn.MaxPool1d(kernel_size=2, stride=2)
+                ])
+                in_channels = out_channels
+                self.compress_factor *= 4  # Each block (conv+pool) reduces length by 4x
 
-            nn.Conv1d(4, 8, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm1d(8),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2),
+            cnn_layers.append(
+                nn.Conv1d(in_channels, cnn_hidden_dim, kernel_size=3, stride=2, padding=1)
+            )
+            cnn_layers.extend([
+                nn.BatchNorm1d(cnn_hidden_dim),
+                nn.ReLU(),
+            ])
+            self.compress_factor *= 2  # Final conv reduces by 2x
+            self.cnn = nn.Sequential(*cnn_layers)
+            self.cnn_dropout = nn.Dropout(dropout_prob)
+            lstm_input_size = cnn_hidden_dim
+        else:
+            lstm_input_size = input_size
 
-            nn.Conv1d(8, cnn_hidden, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm1d(cnn_hidden),
-            nn.ReLU(),
-        )
-
-        # Dropout after CNN
-        self.cnn_dropout = nn.Dropout(dropout_prob)
-
-        # LSTM with inter-layer dropout
+        # LSTM
         self.lstm = nn.LSTM(
-            input_size=cnn_hidden,
+            input_size=lstm_input_size,
             hidden_size=lstm_hidden_size,
             num_layers=num_layers,
             batch_first=True,
             bidirectional=False,
-            dropout=dropout_prob if num_layers > 1 else 0  # Dropout between layers
+            dropout=dropout_prob if num_layers > 1 else 0
         )
 
-        # Final dropout before regressor
         self.final_dropout = nn.Dropout(dropout_prob)
-        self.regressor = nn.Linear(lstm_hidden_size, output_size)
-        self.output_activation = self._set_output_activation(output_activation)
 
-    def _set_output_activation(self, output_activation):
-        activations = {
-            'tanh': nn.Tanh,
-            'sigmoid': nn.Sigmoid,
-            'relu': nn.ReLU,
-        }
+        # Regressor
+        if regressor_hidden_dim:
+            self.regressor = nn.Sequential(
+                nn.Linear(lstm_hidden_size, regressor_hidden_dim),
+                nn.Tanh(),
+                nn.Linear(regressor_hidden_dim, output_size)
+            )
+        else:
+            self.regressor = nn.Linear(lstm_hidden_size, output_size)
+        
+        self.output_activation = self._get_activation(output_activation)
 
-        if output_activation is None:
+    def _get_activation(self, activation_name):
+        if activation_name == 'tanh':
+            return nn.Tanh()
+        elif activation_name == 'sigmoid':
+            return nn.Sigmoid()
+        elif activation_name == 'relu':
+            return nn.ReLU()
+        else:
             return nn.Identity()
 
-        if output_activation not in activations.keys():
-            raise ValueError(f'activation {output_activation} wasnt found!')
-
-        return activations[output_activation]()
-
-
     def forward(self, x, lengths):
-        # Input shape: [batch_size, seq_len, 2]
-        x = x.permute(0, 2, 1)  # [batch_size, 2, seq_len]
-
-        # CNN processing
-        x = self.cnn(x)
-        x = self.cnn_dropout(x)
-
-        # Calculate compressed lengths
-        compressed_lengths = torch.div(lengths, 32, rounding_mode='floor').clamp(min=1)
-
-        # Prepare for LSTM
-        x = x.permute(0, 2, 1)  # [batch_size, compressed_seq_len, cnn_hidden]
-
+        if self.use_cnn:
+            # Process through CNN
+            x = x.permute(0, 2, 1)
+            x = self.cnn(x)
+            x = self.cnn_dropout(x)
+            x = x.permute(0, 2, 1)
+            compressed_lengths = torch.div(lengths, self.compress_factor, rounding_mode='floor').clamp(min=1)
+        else:
+            compressed_lengths = lengths
+        
         # Pack and process
         packed = nn.utils.rnn.pack_padded_sequence(
             x,
@@ -113,115 +98,11 @@ class CNNLSTMModel(nn.Module):
             enforce_sorted=True
         )
 
-        # LSTM processing
+        # LSTM
         output, (h_n, c_n) = self.lstm(packed)
 
-        # Final dropout and regression
+        # Regressor
         last_hidden = self.final_dropout(h_n[-1])
-        output = self.regressor(last_hidden).squeeze()
+        output = self.regressor(last_hidden)
         output = self.output_activation(output)
-        #return output
         return output.reshape(-1, 1)
-
-# ------------------------
-# CNN-LSTM for overfitting
-# ------------------------
-
-class CNN_LSTM_overfit_Model(nn.Module):
-    """Not for actual learning, for testing if pipeline works correct"""
-    def __init__(self,
-                 input_size=2,
-                 cnn_hidden=32,
-                 lstm_hidden_size=32,
-                 num_layers=1,
-                 output_size=1,
-                 dropout_prob=0.0,
-                 regressor_hidden_dim = 1024,
-                 output_activation = 'tanh',):
-        super().__init__()
-
-        # CNN block
-        self.cnn = nn.Sequential(
-            nn.Conv1d(input_size, 4, kernel_size=5, stride=2, padding=2),
-            nn.BatchNorm1d(4),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-
-            nn.Conv1d(4, 8, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm1d(8),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-
-            nn.Conv1d(8, cnn_hidden, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm1d(cnn_hidden),
-            nn.ReLU(),
-        )
-
-        # Dropout after CNN
-        self.cnn_dropout = nn.Dropout(dropout_prob)
-
-        # LSTM with inter-layer dropout
-        self.lstm = nn.LSTM(
-            input_size=cnn_hidden,
-            hidden_size=lstm_hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=False,
-            dropout=dropout_prob if num_layers > 1 else 0  # Dropout between layers
-        )
-
-        # Final dropout before regressor
-        self.final_dropout = nn.Dropout(dropout_prob)
-        self.regressor1 = nn.Linear(lstm_hidden_size, regressor_hidden_dim)
-        self.regressor_activation = nn.Tanh()
-        self.regressor2 = nn.Linear(regressor_hidden_dim, output_size)
-        self.output_activation = self._set_output_activation(output_activation)
-
-    def _set_output_activation(self, output_activation):
-        activations = {
-            'tanh': nn.Tanh,
-            'sigmoid': nn.Sigmoid,
-            'relu': nn.ReLU,
-        }
-
-        if output_activation is None:
-            return nn.Identity()
-
-        if output_activation not in activations.keys():
-            raise ValueError(f'activation {output_activation} wasnt found!')
-
-        return activations[output_activation]()
-
-
-    def forward(self, x, lengths):
-        # Input shape: [batch_size, seq_len, 2]
-        x = x.permute(0, 2, 1)  # [batch_size, 2, seq_len]
-
-        # CNN processing
-        x = self.cnn(x)
-        x = self.cnn_dropout(x)
-
-        # Calculate compressed lengths
-        compressed_lengths = torch.div(lengths, 32, rounding_mode='floor').clamp(min=1)
-
-        # Prepare for LSTM
-        x = x.permute(0, 2, 1)  # [batch_size, compressed_seq_len, cnn_hidden]
-
-        # Pack and process
-        packed = nn.utils.rnn.pack_padded_sequence(
-            x,
-            compressed_lengths.cpu(),
-            batch_first=True,
-            enforce_sorted=True
-        )
-
-        # LSTM processing
-        output, (h_n, c_n) = self.lstm(packed)
-
-        # Final dropout and regression
-        last_hidden = self.final_dropout(h_n[-1])
-        output = self.regressor1(last_hidden).squeeze()
-        output = self.regressor_activation(output)
-        output = self.regressor2(output).squeeze()
-        output = self.output_activation(output)
-        return output

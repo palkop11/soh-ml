@@ -50,8 +50,8 @@ TRAIN_VAL_TEST = {
             ],
     }
 
-def get_subset_info(names, wrkdir):
-    info = make_batteries_info(wrkdir)
+def get_subset_info(names, datadir):
+    info = make_batteries_info(datadir)
     if isinstance(names, str):
         match names:
             case "blacklist":
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     for key in TRAIN_VAL_TEST:
         assert not check_intersec(TRAIN_VAL_TEST[key], BLACKLIST), f'{key} intersects small_list!'
 
-    assert not check_intersec(blacklist, small_list), 'blacklist intersects small_list!'
+    assert not check_intersec(BLACKLIST, SMALL_LIST), 'blacklist intersects small_list!'
     assert not check_intersec(TRAIN_VAL_TEST['train'], TRAIN_VAL_TEST['val']), 'train intersects val!'
     assert not check_intersec(TRAIN_VAL_TEST['train'], TRAIN_VAL_TEST['test']), 'train intersects val!'
 

@@ -4,7 +4,14 @@ import torch
 import yaml
 from pathlib import Path
 
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+
 from .data_splitting import get_subset_info
+from .datasets import DataSetCreation
+from .learning_pipeline import BatteryDataModule, BatteryPipeline, collate_fn
+from .models import UnifiedBatteryModel
 
 class BatteryExperiment:
     def __init__(self, config):
@@ -77,36 +84,18 @@ class BatteryExperiment:
 
     def create_model(self):
         model_config = self.config['model']
-        if model_config['type'] == 'LSTM':
-            return LSTMModel(
-                input_size=model_config['input_size'],
-                hidden_size=model_config['hidden_size'],
-                num_layers=model_config['num_layers'],
-                output_size=model_config['output_size']
-            )
-        elif model_config['type'] == 'CNN-LSTM':
-            return CNNLSTMModel(
-                input_size=model_config['input_size'],
-                cnn_hidden=model_config['cnn_hidden'],
-                lstm_hidden_size=model_config['lstm_hidden_size'],
-                num_layers=model_config['num_layers'],
-                output_size=model_config['output_size'],
-                dropout_prob=model_config.get('dropout', 0.25),
-                output_activation=model_config.get('output_activation', 'tanh')
-            )
-        elif model_config['type'] == 'CNN-LSTM-overfit':
-            return CNN_LSTM_overfit_Model(
-                input_size=model_config['input_size'],
-                cnn_hidden=model_config['cnn_hidden'],
-                lstm_hidden_size=model_config['lstm_hidden_size'],
-                num_layers=model_config['num_layers'],
-                output_size=model_config['output_size'],
-                dropout_prob=model_config.get('dropout', 0),
-                regressor_hidden_dim = model_config.get('regressor_hidden_dim', 1024),
-                output_activation=model_config.get('output_activation', 'tanh')
-            )
-        else:
-            raise ValueError(f"Unknown model type: {model_config['type']}")
+        
+        return UnifiedBatteryModel(
+            input_size=model_config['input_size'],
+            cnn_hidden_dim=model_config.get('cnn_hidden_dim'),
+            cnn_channels=model_config.get('cnn_channels', [4, 8, 16]),
+            lstm_hidden_size=model_config['lstm_hidden_size'],
+            num_layers=model_config['num_layers'],
+            output_size=model_config['output_size'],
+            dropout_prob=model_config.get('dropout', 0.25),
+            regressor_hidden_dim=model_config.get('regressor_hidden_dim'),
+            output_activation=model_config.get('output_activation', 'sigmoid')
+        )
 
     def create_datamodule(self):
         return BatteryDataModule(

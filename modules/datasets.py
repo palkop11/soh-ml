@@ -72,7 +72,7 @@ class SingleBatteryDataset(Dataset):
                 x_step : int = 1,
                 x_npz_key : str = 'current_voltage_unitless',
                 normalize : dict[callable] = {},
-                n_diff : int or None = None,
+                n_diff : int | None = None,
             ):
         super().__init__()
         self.battery_path = battery_path
@@ -227,7 +227,7 @@ class CompositeBatteryDataset(Dataset):
 # -------------------------------------
 
 class GlobalStatsCalculator:
-    def __init__(self, stat_type: str or None, target: str = 'x'):
+    def __init__(self, stat_type: str | None, target: str = 'x'):
         """
         Calculate global statistics for normalization.
 
@@ -376,7 +376,7 @@ class DataSetCreation:
             normalization_types : dict[str] = {'x':'minmax', 'y':'meanstd'},
             StatsCalculator = GlobalStatsCalculator,
             x_step : int = 1,
-            n_diff : int or None = None,
+            n_diff : int | None = None,
             Single : SingleBatteryDataset = SingleBatteryDataset,
             Composite : CompositeBatteryDataset = CompositeBatteryDataset,
         ):
