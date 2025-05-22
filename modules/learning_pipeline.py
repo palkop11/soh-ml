@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torchmetrics import MeanSquaredError, MeanAbsolutePercentageError
+from torchmetrics import MeanSquaredError, MeanAbsolutePercentageError, PearsonCorrCoef, R2Score, MetricCollection
 
 def collate_fn(batch):
     """Collate function compatible with PyTorch Lightning"""
@@ -86,29 +86,59 @@ class BatteryDataModule(pl.LightningDataModule):
 
 class BatteryPipeline(pl.LightningModule):
     def __init__(
-            self,
-            model,
-            denormalize_y = lambda y: y,
-            loss_fn=nn.MSELoss(),
-            learning_rate=1e-3
-            ):
-
+        self,
+        model,
+        denormalize_y=lambda y: y,
+        loss_type='mse',  # 'mse', 'huber', 'bce'
+        huber_delta=1.0,  # Only for huber loss
+        learning_rate=1e-3,
+        metrics=None
+    ):
         super().__init__()
-        self.save_hyperparameters(ignore=['model'])
+        self.save_hyperparameters(ignore=['model', 'denormalize_y'])
         self.model = model
-
-        # denormalize y for metrics calculation
         self.denormalize_y = denormalize_y
 
+        # Configure loss function
+        self.loss_fn = self._get_loss_fn(loss_type, huber_delta)
+        
+        # Configure metrics
+        self.metric_classes = metrics or {
+            'mse': MeanSquaredError,
+            'mape': MeanAbsolutePercentageError,
+            'r2': R2Score,
+            'pcc': PearsonCorrCoef,
+        }
+
         # Initialize metrics
-        self.train_mse = MeanSquaredError()
-        self.train_mape = MeanAbsolutePercentageError()
-        self.val_mse = MeanSquaredError()
-        self.val_mape = MeanAbsolutePercentageError()
-        self.test_mse = MeanSquaredError()
-        self.test_mape = MeanAbsolutePercentageError()
+        self._init_metrics()
+
+    def _get_loss_fn(self, loss_type, huber_delta):
+        loss_mapping = {
+            'mse': nn.MSELoss(),
+            'huber': nn.HuberLoss(delta=huber_delta),
+            'bce': nn.BCELoss()
+        }
+        if loss_type not in loss_mapping:
+            raise ValueError(f"Invalid loss_type: {loss_type}. Choose from {list(loss_mapping.keys())}")
+        return loss_mapping[loss_type]
+
+    def _init_metrics(self):
+        self.train_metrics = MetricCollection(
+            {name: cls() for name, cls in self.metric_classes.items()},
+            prefix='train_'
+        )
+        self.val_metrics = MetricCollection(
+            {name: cls() for name, cls in self.metric_classes.items()},
+            prefix='val_'
+        )
+        self.test_metrics = MetricCollection(
+            {name: cls() for name, cls in self.metric_classes.items()},
+            prefix='test_'
+        )
 
     def forward(self, x, lengths):
+        """Assumes model already has appropriate output activation"""
         return self.model(x, lengths)
 
     def _shared_step(self, batch):
@@ -116,67 +146,55 @@ class BatteryPipeline(pl.LightningModule):
         lengths = batch['lengths']
         y_true = batch['y']
         y_pred = self(x, lengths)
-        loss = self.hparams.loss_fn(y_pred, y_true)
+        
+        # Validate targets for BCE
+        if isinstance(self.loss_fn, nn.BCELoss):
+            y_true = y_true.float()
+            if torch.any(y_true < 0) or torch.any(y_true > 1):
+                raise ValueError(
+                    f"Targets for BCE must be in [0,1] range. "
+                    f"Found min={y_true.min():.4f}, max={y_true.max():.4f}"
+                )
+        
+        loss = self.loss_fn(y_pred, y_true)
         return loss, y_pred, y_true
+
+    def _update_metrics(self, metrics, y_pred, y_true):
+        y_pred_denorm = self.denormalize_y(y_pred)
+        y_true_denorm = self.denormalize_y(y_true)
+        metrics(y_pred_denorm, y_true_denorm)
+
+    def _log_metrics(self, metrics):
+        results = metrics.compute()
+        for name, value in results.items():
+            self.log(name, value)
+        metrics.reset()
+        return results
 
     def training_step(self, batch, batch_idx):
         loss, y_pred, y_true = self._shared_step(batch)
-
-        # Update metrics
-        y_pred_denorm = self.denormalize_y(y_pred)
-        y_true_denorm = self.denormalize_y(y_true)
-
-        self.train_mse(y_pred_denorm, y_true_denorm)
-        self.train_mape(y_pred_denorm, y_true_denorm)
-
-        self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        self._update_metrics(self.train_metrics, y_pred, y_true)
+        self.log('train_loss', loss, on_epoch=True, prog_bar=True)
         return loss
 
     def on_train_epoch_end(self):
-        self.log('train_mse', self.train_mse.compute(), prog_bar=True)
-        self.log('train_mape', self.train_mape.compute())
-        self.train_mse.reset()
-        self.train_mape.reset()
+        self._log_metrics(self.train_metrics)
 
     def validation_step(self, batch, batch_idx):
         loss, y_pred, y_true = self._shared_step(batch)
-
-        # Update metrics
-        y_pred_denorm = self.denormalize_y(y_pred)
-        y_true_denorm = self.denormalize_y(y_true)
-
-        self.val_mse(y_pred_denorm, y_true_denorm)
-        self.val_mape(y_pred_denorm, y_true_denorm)
-
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        self._update_metrics(self.val_metrics, y_pred, y_true)
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self):
-        self.log('val_mse', self.val_mse.compute(), prog_bar=True)
-        self.log('val_mape', self.val_mape.compute())
-        self.val_mse.reset()
-        self.val_mape.reset()
+        self._log_metrics(self.val_metrics)
 
     def test_step(self, batch, batch_idx):
         loss, y_pred, y_true = self._shared_step(batch)
-
-        # Denormalize for metrics
-        y_pred_denorm = self.denormalize_y(y_pred)
-        y_true_denorm = self.denormalize_y(y_true)
-
-        # Update test metrics
-        self.test_mse(y_pred_denorm, y_true_denorm)
-        self.test_mape(y_pred_denorm, y_true_denorm)
-
-        # Optional: Store predictions for later analysis
-        self.log('test_loss', loss, on_epoch=True, prog_bar=True)
-        return {'test_loss': loss, 'y_pred': y_pred, 'y_true': y_true}
+        self._update_metrics(self.test_metrics, y_pred, y_true)
+        return {'loss': loss, 'y_pred': y_pred, 'y_true': y_true}
 
     def on_test_epoch_end(self):
-        # Log aggregated test metrics
-        self.log('test_mse', self.test_mse.compute(), prog_bar=True)
-        self.log('test_mape', self.test_mape.compute())
-        self.test_mse.reset()
-        self.test_mape.reset()
+        return self._log_metrics(self.test_metrics)
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)

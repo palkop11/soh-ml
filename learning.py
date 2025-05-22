@@ -25,11 +25,12 @@ experiment_config = {
     },
 
     'resume_ckpt': 'auto',
+    'loss_type': 'bce',
     
     'training': {
         'batch_size': 8,
         'learning_rate': 1e-3,
-        'epochs': 1,
+        'epochs': 2,
         'accelerator': 'auto',
         'devices': 1,
     },

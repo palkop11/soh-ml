@@ -116,7 +116,7 @@ class BatteryExperiment:
         return BatteryPipeline(
             model=self.model,
             denormalize_y=self.train_ds.denormalize['y'],
-            loss_fn=torch.nn.MSELoss(),
+            loss_type=self.config.get('loss_type', 'mse'), # 'mse', 'huber', 'bce'
             learning_rate=self.config['training']['learning_rate']
         )
 
@@ -196,8 +196,8 @@ class BatteryExperiment:
             model = self.pipeline,
             dataloaders = dataloader, )
 
-    def analyze_results(self, dataset_type='val', savefig = False, xylims = None):
-        """Generate predictions and plots for analysis"""
+    def analyze_results(self, dataset_type='val', savefig=False, xylims=None):
+        """Generate predictions and plots with dynamic metrics"""
         self.pipeline.eval()
         dataloader = {
             'train': self.datamodule.train_dataloader(),
@@ -222,20 +222,51 @@ class BatteryExperiment:
         y_true_denorm = self.train_ds.denormalize['y'](y_true)
         y_pred_denorm = self.train_ds.denormalize['y'](y_pred)
 
-        # Plotting
-        plt.figure()
+        # Calculate metrics using pipeline's metric classes
+        metrics = {}
+        for name, metric_cls in self.pipeline.metric_classes.items():
+            metric = metric_cls().to(y_pred_denorm.device)
+            metrics[name] = metric(y_pred_denorm, y_true_denorm).item()
+
+        # Create figure
+        plt.figure(figsize=(10, 8))
+        
+        # Main plot
         plt.scatter(y_true_denorm, y_pred_denorm, alpha=0.5)
         plt.plot([y_true_denorm.min(), y_true_denorm.max()],
-                 [y_true_denorm.min(), y_true_denorm.max()], 'r--')
+                [y_true_denorm.min(), y_true_denorm.max()], 'r--')
         plt.xlabel('True Values')
         plt.ylabel('Predictions')
         plt.title(f'{dataset_type.capitalize()} Set: True vs Predicted')
+
+        # Format metrics text
+        metric_text = "\n".join([f"{name.upper()}: {val:.4f}" for name, val in metrics.items()])
+
+        # Add experiment info
+        exp_name = self.config['experiment_name']
+        version = getattr(self.logger, 'version', 'unknown')
+        plt.suptitle(
+            f"Experiment: {exp_name}\n"
+            f"Version: {version}\n"
+            f"Metrics:\n{metric_text}",
+            y=1.02, 
+            fontsize=10,
+            ha='left',
+            x=0.15
+        )
+
         if xylims is not None:
             plt.xlim(xylims)
             plt.ylim(xylims)
-        if savefig:
-            plt.savefig(self.exp_dir / f'{dataset_type}_predictions.png')
-        plt.show()
-        #plt.close()
+        
+        plt.tight_layout()
 
-        return y_true_denorm.numpy(), y_pred_denorm.numpy()
+        if savefig:
+            plt.savefig(
+                self.exp_dir / f'{dataset_type}_predictions.png',
+                bbox_inches='tight',
+                dpi=300
+            )
+        plt.show()
+
+        return y_true_denorm.numpy(), y_pred_denorm.numpy(), metrics
