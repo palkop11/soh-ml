@@ -56,6 +56,22 @@ def load_config(config_path=None):
         print("Using default configuration")
     return config
 
+def run_experiment(config, savefig = True):
+    # Load configuration
+    experiment_config = load_config(config)
+
+    # Run experiment
+    experiment = BatteryExperiment(experiment_config)
+    results = experiment.run()
+
+    # Generate analysis plots
+    _ = experiment.analyze_results('train', savefig=savefig)
+    _ = experiment.analyze_results('val', savefig=savefig)
+    print('metrics on train:')
+    train_metrics = experiment.calculate_metrics('train')
+    print('metrics on val:')
+    val_metrics = experiment.calculate_metrics('val')
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Run battery experiment')
@@ -63,20 +79,7 @@ def main():
                        help='Path to YAML config file (optional)')
     args = parser.parse_args()
 
-    # Load configuration
-    experiment_config = load_config(args.config)
-
-    # Run experiment
-    experiment = BatteryExperiment(experiment_config)
-    results = experiment.run()
-
-    # Generate analysis plots
-    _ = experiment.analyze_results('train', savefig=True)
-    _ = experiment.analyze_results('val', savefig=True)
-    print('metrics on train:')
-    train_metrics = experiment.calculate_metrics('train')
-    print('metrics on val:')
-    val_metrics = experiment.calculate_metrics('val')
+    run_experiment(args.config)
 
 if __name__ == '__main__':
     main()
