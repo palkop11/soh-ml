@@ -17,8 +17,8 @@ class BatteryExperiment:
     def __init__(self, config):
         self.config = config
         self.set_seed()
-        self.prepare_paths()
         self.logger = self.create_logger()
+        self.prepare_paths()
         self.model = None
         self.datamodule = None
         self.pipeline = None
@@ -34,8 +34,14 @@ class BatteryExperiment:
         torch.backends.cudnn.benchmark = False
 
     def prepare_paths(self):
-        self.exp_dir = Path(self.config['logging']['log_dir']) / self.config['experiment_name']
+        # Get the version from the logger (auto-generated if not specified)
+        version = self.logger.version if isinstance(self.logger.version, str) else f"version_{self.logger.version}"
+        
+        # Versioned experiment directory
+        self.exp_dir = Path(self.config['logging']['log_dir']) / self.config['experiment_name'] / version
         self.exp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Checkpoints inside versioned dir
         self.checkpoint_dir = self.exp_dir / 'checkpoints'
         self.checkpoint_dir.mkdir(exist_ok=True)
 
@@ -122,7 +128,7 @@ class BatteryExperiment:
             devices=self.config['training'].get('devices', 1),
             callbacks=[
                 pl.callbacks.ModelCheckpoint(
-                    dirpath=self.checkpoint_dir,
+                    dirpath=self.checkpoint_dir,  # Now inside versioned dir
                     monitor='val_loss',
                     mode='min',
                     save_top_k=1
