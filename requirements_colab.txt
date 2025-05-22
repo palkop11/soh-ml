@@ -1,0 +1,11 @@
+matplotlib==3.10.3
+numpy==2.2.6
+pandas==2.2.3
+pytorch_lightning==2.5.1.post0
+PyYAML==6.0.2
+PyYAML==6.0.2
+scikit_learn==1.6.1
+tbparse==0.0.9
+tensorboard==2.18.0
+torch==2.6.0+cu124
+torchmetrics==1.7.1
