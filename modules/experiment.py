@@ -41,6 +41,9 @@ class BatteryExperiment:
         self.exp_dir = Path(self.config['logging']['log_dir']) / self.config['experiment_name'] / version
         self.exp_dir.mkdir(parents=True, exist_ok=True)
         
+        # Set name for config in .yaml
+        self.config_filename = '_'.join([self.config['experiment_name'], version, 'config']) + '.yaml'
+
         # Checkpoints inside versioned dir
         self.checkpoint_dir = self.exp_dir / 'checkpoints'
         self.checkpoint_dir.mkdir(exist_ok=True)
@@ -141,7 +144,7 @@ class BatteryExperiment:
 
     def run(self):
         # Save config for reproducibility
-        with open(self.exp_dir / 'config.yaml', 'w') as f:
+        with open(self.exp_dir / self.config_filename, 'w') as f:
             yaml.dump(self.config, f)
 
         # Experiment pipeline
