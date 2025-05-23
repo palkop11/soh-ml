@@ -3,7 +3,7 @@ import yaml
 from pathlib import Path
 from modules.experiment import BatteryExperiment
 
-# Default configuration (same as original)
+# TEST CONFIGURATION
 DEFAULT_CONFIG = {
     'experiment_name': 'testing_on_small', # also used for TensorBoard logging
     'seed': 42,
@@ -56,10 +56,25 @@ def load_config(config_path=None):
         print("Using default configuration")
     return config
 
-def run_experiment(config, savefig = True):
+def run_experiment(
+        config: str | dict, 
+        savefig: bool = True,
+        ):
+    """
+    config may be str (path to config in .yaml file)
+    or config in python dictionary
+    """
+    # config may be str path to config.yaml
+    if isinstance(config, str):
     # Load configuration
-    experiment_config = load_config(config)
-
+        experiment_config = load_config(config)
+    # or already prepared 
+    elif isinstance(config, dict):
+        experiment_config = config
+    else:
+        raise TypeError('Unsupported type of config. ' \
+        'Either pass path to config in .yaml format or pass config dictionary')
+    
     # Run experiment
     experiment = BatteryExperiment(experiment_config)
     results = experiment.run()
