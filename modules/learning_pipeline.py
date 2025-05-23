@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torchmetrics import MeanSquaredError, MeanAbsolutePercentageError, PearsonCorrCoef, R2Score, MetricCollection
+from torchmetrics import MeanSquaredError, MeanAbsolutePercentageError, PearsonCorrCoef, R2Score, MetricCollection, MeanAbsoluteError
 
 def collate_fn(batch):
     """Collate function compatible with PyTorch Lightning"""
@@ -92,7 +92,7 @@ class BatteryPipeline(pl.LightningModule):
         loss_type='mse',  # 'mse', 'huber', 'bce'
         huber_delta=1.0,  # Only for huber loss
         learning_rate=1e-3,
-        metrics=None
+        metrics=None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=['model', 'denormalize_y'])
@@ -103,15 +103,9 @@ class BatteryPipeline(pl.LightningModule):
         self.loss_fn = self._get_loss_fn(loss_type, huber_delta)
         
         # Configure metrics
-        self.metric_classes = metrics or {
-            'mse': MeanSquaredError,
-            'mape': MeanAbsolutePercentageError,
-            'r2': R2Score,
-            'pcc': PearsonCorrCoef,
-        }
 
         # Initialize metrics
-        self._init_metrics()
+        self._init_metrics(metrics)
 
     def _get_loss_fn(self, loss_type, huber_delta):
         loss_mapping = {
@@ -123,7 +117,27 @@ class BatteryPipeline(pl.LightningModule):
             raise ValueError(f"Invalid loss_type: {loss_type}. Choose from {list(loss_mapping.keys())}")
         return loss_mapping[loss_type]
 
-    def _init_metrics(self):
+    def _init_metrics(self, metrics):
+        metrics_set = {
+            'mse': MeanSquaredError,
+            'mae': MeanAbsoluteError,
+            'mape': MeanAbsolutePercentageError,
+            'r2': R2Score,
+            'pcc': PearsonCorrCoef,
+        }
+
+        self.metric_classes = {}
+
+        if isinstance(metrics, list):
+            for key in metrics:
+                if key in metrics_set.keys():
+                    self.metric_classes[key] = metrics_set[key]
+                else:
+                    print(f'!WARNING: \'{key}\' metric is not supported')
+
+        if metrics is None or metrics == 'all' or len(self.metric_classes) == 0:    
+            self.metric_classes = metrics_set
+
         self.train_metrics = MetricCollection(
             {name: cls() for name, cls in self.metric_classes.items()},
             prefix='train_'

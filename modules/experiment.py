@@ -93,7 +93,7 @@ class BatteryExperiment:
         
         return UnifiedBatteryModel(
             input_size=model_config['input_size'],
-            cnn_hidden_dim=model_config.get('cnn_hidden_dim'),
+            cnn_hidden_dim=model_config.get('cnn_hidden_dim', 16),
             cnn_channels=model_config.get('cnn_channels', [4, 8, 16]),
             lstm_hidden_size=model_config['lstm_hidden_size'],
             num_layers=model_config['num_layers'],
@@ -117,7 +117,8 @@ class BatteryExperiment:
             model=self.model,
             denormalize_y=self.train_ds.denormalize['y'],
             loss_type=self.config.get('loss_type', 'mse'), # 'mse', 'huber', 'bce'
-            learning_rate=self.config['training']['learning_rate']
+            learning_rate=self.config['training']['learning_rate'],
+            metrics = self.config.get('metrics', None), # list like ['mse', 'mae', 'mape', 'r2', 'rcc']
         )
 
     def create_trainer(self):
