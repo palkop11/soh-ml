@@ -1,5 +1,4 @@
 from glob import glob
-from pathlib import Path
 import re
 import bisect
 
@@ -8,21 +7,6 @@ import pandas as pd
 
 import torch
 from torch.utils.data import Dataset
-
-
-def make_batteries_info(datadir):
-    batteries_paths = glob(datadir + '/**/*/')
-    IDs = [Path(s).stem for s in batteries_paths]
-    df = pd.DataFrame({'ID':IDs, 'battery_path': batteries_paths})
-    df['large_small'] = df.ID.apply(lambda s: re.sub(r'_.*$', '', s))
-    df['chem'] = df.ID.apply(lambda s: re.sub(r'^.*_([A-Za-z]+)\d+$', r'\1', s))
-
-    info_csv = pd.read_csv(datadir + '/info.csv').rename(columns = {'Unnamed: 0': 'ID_without_size'})
-    info_csv['ID'] = info_csv['large'].apply(lambda s: 'large' if s else 'small') + '_' + info_csv['ID_without_size']
-    info_csv[['ID', 'n_cycles']]
-    df_merged = pd.merge(df, info_csv[['ID', 'n_cycles']], on = 'ID', how = 'inner')
-
-    return df_merged
 
 # ----------------------
 # Single Battery Dataset
