@@ -25,7 +25,7 @@ class BatteryExperiment:
         self.trainer = None
 
     def set_seed(self, seed=None):
-        seed = seed or self.config.get('seed', 42)
+        seed = seed or self.config['seed']
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         np.random.seed(seed)
@@ -52,7 +52,7 @@ class BatteryExperiment:
         return TensorBoardLogger(
             save_dir=self.config['logging']['log_dir'],
             name=self.config['experiment_name'],
-            version=self.config.get('version', None)
+            version=None, #self.config.get('version', None)
         )
 
     def prepare_datasets(self):
@@ -65,7 +65,7 @@ class BatteryExperiment:
             train_info,
             fit_normalization=True,
             normalization_types=self.config['data']['normalization'],
-            n_diff=self.config['data'].get('n_diff', None)
+            n_diff=self.config['data']['n_diff']
         )
 
         # Validation dataset
@@ -76,11 +76,11 @@ class BatteryExperiment:
         self.val_ds = DataSetCreation(
             val_info,
             normalize=self.train_ds.normalize,
-            n_diff=self.config['data'].get('n_diff', None)
+            n_diff=self.config['data']['n_diff']
         )
 
         # Test dataset (optional)
-        if 'test_info' in self.config['data']:
+        if self.config['data']['test']:
             test_info = get_subset_info(
                 subset = self.config['data']['test'],
                 datadir = self.config['data']['datadir']
@@ -88,7 +88,7 @@ class BatteryExperiment:
             self.test_ds = DataSetCreation(
                 test_info,
                 normalize=self.train_ds.normalize,
-                n_diff=self.config['data'].get('n_diff', None)
+                n_diff=self.config['data']['n_diff']
             )
 
     def create_model(self):
@@ -96,14 +96,14 @@ class BatteryExperiment:
         
         return UnifiedBatteryModel(
             input_size=model_config['input_size'],
-            cnn_hidden_dim=model_config.get('cnn_hidden_dim', 16),
-            cnn_channels=model_config.get('cnn_channels', [4, 8, 16]),
+            cnn_hidden_dim=model_config['cnn_hidden_dim'],
+            cnn_channels=model_config['cnn_channels'],
             lstm_hidden_size=model_config['lstm_hidden_size'],
             num_layers=model_config['num_layers'],
             output_size=model_config['output_size'],
-            dropout_prob=model_config.get('dropout', 0.25),
-            regressor_hidden_dim=model_config.get('regressor_hidden_dim'),
-            output_activation=model_config.get('output_activation', 'sigmoid')
+            dropout_prob=model_config['dropout'],
+            regressor_hidden_dim=model_config['regressor_hidden_dim'],
+            output_activation=model_config['output_activation'],
         )
 
     def create_datamodule(self):
@@ -119,17 +119,17 @@ class BatteryExperiment:
         return BatteryPipeline(
             model=self.model,
             denormalize_y=self.train_ds.denormalize['y'],
-            loss_type=self.config['training'].get('loss_type', 'mse'), # 'mse', 'huber', 'bce'
+            loss_type=self.config['training']['loss_type'], # 'mse', 'huber', 'bce'
             learning_rate=self.config['training']['learning_rate'],
-            metrics = self.config.get('metrics', None), # list like ['mse', 'mae', 'mape', 'r2', 'rcc']
+            metrics = self.config['metrics'], # list like ['mse', 'mae', 'mape', 'r2', 'rcc']
         )
 
     def create_trainer(self):
         return pl.Trainer(
             max_epochs=self.config['training']['epochs'],
             logger=self.logger,
-            accelerator=self.config['training'].get('accelerator', 'auto'),
-            devices=self.config['training'].get('devices', 1),
+            accelerator=self.config['training']['accelerator'],
+            devices=self.config['training']['devices'],
             callbacks=[
                 pl.callbacks.ModelCheckpoint(
                     dirpath=self.checkpoint_dir,  # Now inside versioned dir
@@ -138,7 +138,7 @@ class BatteryExperiment:
                     save_top_k=1
                 )
             ],
-            enable_progress_bar=self.config['logging'].get('progress_bar', True),
+            enable_progress_bar=self.config['logging']['progress_bar'],
             deterministic=True
         )
 
@@ -155,7 +155,7 @@ class BatteryExperiment:
         self.trainer = self.create_trainer()
 
         # Checkpoint path (specify in config or auto-detect latest)
-        ckpt_path = self.config['training'].get('resume_ckpt', None)
+        ckpt_path = self.config['training']['resume_ckpt']
         if ckpt_path == 'auto':
             # Find latest checkpoint in checkpoint_dir
             checkpoints = list(self.checkpoint_dir.glob('*.ckpt'))

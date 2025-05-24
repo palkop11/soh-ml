@@ -19,7 +19,7 @@ test_config = {
                     'small_NMC15',
                 ],
         'val': ['small_LFP5', 'small_NMC11'],
-        #'test': None, # comment this line if you do not pass test dataset
+        'test': None,
         'normalization': {'x': None, 'y': 'minmax_zero_one'},
         'n_diff': 0,
     },
@@ -27,6 +27,7 @@ test_config = {
     'model': {
         'input_size': 2,
         'cnn_hidden_dim': 32,
+        'cnn_channels': [4, 8, 16],
         'lstm_hidden_size': 32,
         'num_layers': 1,
         'output_size': 1,
