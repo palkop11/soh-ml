@@ -3,6 +3,7 @@ from pathlib import Path
 from glob import glob
 
 import pandas as pd
+from sklearn.model_selection import KFold, StratifiedKFold
 
 
 def make_batteries_info(datadir):
@@ -19,7 +20,7 @@ def make_batteries_info(datadir):
 
     return df_merged
 
-splits = {
+SPLITS = {
     'blacklist': [
             'large_LFP10',
             'large_LFP11',
@@ -70,7 +71,11 @@ twins = [
     ('large_LFP6', 'large_LFP7'),
 ]
 
-def get_subset_info(subset, datadir, splits = splits):
+# -------------------------
+# get subset info dataframe
+# -------------------------
+
+def get_subset_info(subset, datadir, splits = SPLITS):
     info = make_batteries_info(datadir)
 
     # subset is str
@@ -83,17 +88,110 @@ def get_subset_info(subset, datadir, splits = splits):
 
     # subset is list of IDs
     if isinstance(subset, list):
-        return info.query('ID in @subset') 
+        return info.query('ID in @subset')
+
+def check_intersec(subset1, subset2):
+    intersec = set(subset1).intersection(set(subset2))
+    return len(intersec) > 0
+
+# -------------------------
+# regular/stratified k-fold
+# -------------------------
+
+def create_folds(
+    df,
+    n_splits=2,
+    verbose=False,
+    method='regular',
+    strat_label=None,
+):
+    """
+    Unified function for creating regular or stratified K-Fold splits.
+    
+    Parameters:
+        df (pd.DataFrame): Input dataframe containing 'ID' column and data.
+        n_splits (int): Number of folds to generate.
+        verbose (bool): Whether to print fold details.
+        method (str): 'regular' for KFold or 'stratified' for StratifiedKFold.
+        strat_label (str): Column name (common choice - 'chem') for stratification labels 
+        (required if method='stratified').
+        
+    Returns:
+        list: List of dictionaries with 'train' and 'val' IDs for each fold.
+    """
+    # Validate n_splits
+    if n_splits < 2:
+        raise ValueError("n_splits must be >= 2 for meaningful splitting")
+    
+    # Validate method
+    if method not in ['regular', 'stratified']:
+        raise ValueError("Method must be 'regular' or 'stratified'")
+    
+    # Validate strat_label for stratified method
+    if method == 'stratified':
+        if strat_label is None:
+            raise ValueError("strat_label must be provided for stratified method")
+        if strat_label not in df.columns:
+            raise ValueError(f"Column '{strat_label}' not found in dataframe")
+    
+    # Initialize splitter
+    if method == 'stratified':
+        splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        y = df[strat_label].tolist()
+    else:
+        splitter = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        y = None
+    
+    X = df.index.to_list()  # Split using dataframe indices
+    folds_output = []
+    
+    # Generate folds
+    for fold, (train_idx, val_idx) in enumerate(splitter.split(X, y), 1):
+        train_df = df.iloc[train_idx]
+        val_df = df.iloc[val_idx]
+        fold_data = {
+            'train': train_df['ID'].tolist(),
+            'val': val_df['ID'].tolist()
+        }
+        folds_output.append(fold_data)
+        
+        if verbose:
+            print(f"Fold {fold}:")
+            print("Train IDs:", fold_data['train'])
+            print("Val IDs:", fold_data['val'])
+            print("\n")
+    
+    return folds_output
 
 if __name__ == '__main__':
 
-    def check_intersec(subset1, subset2):
-        intersec = set(subset1).intersection(set(subset2))
-        return len(intersec) > 0
-
-    for key1 in splits.keys():
-        for key2 in splits.keys():
+    # check if subsets in SPLITS interesect
+    for key1 in SPLITS.keys():
+        for key2 in SPLITS.keys():
             if key1 != key2:
-                assert not check_intersec(splits[key1], splits[key2]), f'{key1} intersects {key2}!'
+                assert not check_intersec(SPLITS[key1], SPLITS[key2]), f'{key1} intersects {key2}!'
+    print('There are no intersections between subsets in SPLITS\n')
 
-    print('There are no intersections between subsets in splits')
+    # test k-fold
+    print('\nregular folds on small subset:')
+    regular_folds_small = create_folds(
+        df = get_subset_info('small', './DATA/dataset_v5_ts_npz'),
+        n_splits=4,
+        verbose=True,
+    )
+
+    print('\nstrat folds on small subset:')
+    strat_folds_small = create_folds(
+        df = get_subset_info('small', './DATA/dataset_v5_ts_npz'),
+        n_splits=4,
+        verbose=True,
+        method='stratified',
+        strat_label='chem',
+    )
+
+    print('\nregular folds on train subset:')
+    regular_folds_train = create_folds(
+        df = get_subset_info('train', './DATA/dataset_v5_ts_npz'),
+        n_splits=5,
+        verbose=True,
+    )
