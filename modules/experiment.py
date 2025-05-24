@@ -70,7 +70,7 @@ class BatteryExperiment:
 
         # Validation dataset
         val_info = get_subset_info(
-            names = self.config['data']['val'],
+            subset = self.config['data']['val'],
             datadir = self.config['data']['datadir']
         )
         self.val_ds = DataSetCreation(

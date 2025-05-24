@@ -19,86 +19,81 @@ def make_batteries_info(datadir):
 
     return df_merged
 
-BLACKLIST = [
-        'large_LFP10',
-        'large_LFP11',
-        'large_LTO11',
-        'large_LTO12',
-        'small_LTO7',
-        'small_LTO6',
-        'small_LTO4',
-        'small_LTO5',
-    ]
+splits = {
+    'blacklist': [
+            'large_LFP10',
+            'large_LFP11',
+            'large_LTO11',
+            'large_LTO12',
+            'small_LTO7',
+            'small_LTO6',
+            'small_LTO4',
+            'small_LTO5',
+        ],
 
-SMALL_LIST = [
-        'small_LFP4',
-        'small_LFP1',
-        'small_LFP8',
-        'small_LFP5',
-        'small_NMC14',
-        'small_NMC15',
-        'small_NMC11',
-        'small_NMC10',
-    ]
+    'small': [
+            'small_LFP4',
+            'small_LFP1',
+            'small_LFP8',
+            'small_LFP5',
+            'small_NMC14',
+            'small_NMC15',
+            'small_NMC11',
+            'small_NMC10',
+        ],
 
-'''
-twins:
-    large_NMC13, large_NMC12
-    large_NMC7, large_NMC6
-    large_LFP3, large_LFP2
-    large_LFP6, large_LFP7
-'''
+    'train': [
+        'large_LFP13',
+        'large_LFP2',
+        'large_LFP3',
+        'large_NMC12',
+        'large_NMC13',
+        ],
 
-TRAIN_VAL_TEST = {
-        'train': [
-            'large_LFP13',
-            'large_LFP2',
-            'large_LFP3',
-            'large_NMC12',
-            'large_NMC13',
-            ],
-        'val': [
-            'large_LFP6',
-            'large_LFP7',
-            'large_LTO3',
-            ],
-        'test': [
-            'large_LFP12',
-            'large_NMC6',
-            'large_NMC7',
-            ],
-    }
+    'val': [
+        'large_LFP6',
+        'large_LFP7',
+        'large_LTO3',
+        ],
 
-def get_subset_info(names, datadir):
+    'test': [
+        'large_LFP12',
+        'large_NMC6',
+        'large_NMC7',
+        ],
+}
+
+twins = [
+    ('large_NMC13', 'large_NMC12'),
+    ('large_NMC7', 'large_NMC6'),
+    ('large_LFP3', 'large_LFP2'),
+    ('large_LFP6', 'large_LFP7'),
+]
+
+def get_subset_info(subset, datadir, splits = splits):
     info = make_batteries_info(datadir)
-    if isinstance(names, str):
-        match names:
-            case "blacklist":
-                return info.query('ID in @BLACKLIST')
-            case "small":
-                return info.query('ID in @SMALL_LIST')
-            case ["train", "val", "test"]:
-                id_in_info = TRAIN_VAL_TEST[names]
-                return info.query('ID in @id_in_info')
 
-    # name is 
-    if isinstance(names, list):
-        return info.query('ID in @names') 
+    # subset is str
+    if isinstance(subset, str):
+        if subset in splits.keys():
+            subset_list = splits[subset]
+            return info.query('ID in @subset_list')
+        else:
+            raise KeyError(f'Key \'{subset}\' not found')
+
+    # subset is list of IDs
+    if isinstance(subset, list):
+        return info.query('ID in @subset') 
 
 if __name__ == '__main__':
 
     def check_intersec(subset1, subset2):
         intersec = set(subset1).intersection(set(subset2))
         return len(intersec) > 0
-    
-    for key in TRAIN_VAL_TEST:
-        assert not check_intersec(TRAIN_VAL_TEST[key], BLACKLIST), f'{key} intersects blacklist!'
 
-    for key in TRAIN_VAL_TEST:
-        assert not check_intersec(TRAIN_VAL_TEST[key], BLACKLIST), f'{key} intersects small_list!'
+    for key1 in splits.keys():
+        for key2 in splits.keys():
+            if key1 != key2:
+                assert not check_intersec(splits[key1], splits[key2]), f'{key1} intersects {key2}!'
 
-    assert not check_intersec(BLACKLIST, SMALL_LIST), 'blacklist intersects small_list!'
-    assert not check_intersec(TRAIN_VAL_TEST['train'], TRAIN_VAL_TEST['val']), 'train intersects val!'
-    assert not check_intersec(TRAIN_VAL_TEST['train'], TRAIN_VAL_TEST['test']), 'train intersects val!'
-
-    print('There are no intersections between blacklist, small_set, train, val, test!')
+    print('There are no intersections between subsets in splits')
