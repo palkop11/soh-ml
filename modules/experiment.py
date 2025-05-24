@@ -119,7 +119,7 @@ class BatteryExperiment:
         return BatteryPipeline(
             model=self.model,
             denormalize_y=self.train_ds.denormalize['y'],
-            loss_type=self.config.get('loss_type', 'mse'), # 'mse', 'huber', 'bce'
+            loss_type=self.config['training'].get('loss_type', 'mse'), # 'mse', 'huber', 'bce'
             learning_rate=self.config['training']['learning_rate'],
             metrics = self.config.get('metrics', None), # list like ['mse', 'mae', 'mape', 'r2', 'rcc']
         )
@@ -155,7 +155,7 @@ class BatteryExperiment:
         self.trainer = self.create_trainer()
 
         # Checkpoint path (specify in config or auto-detect latest)
-        ckpt_path = self.config.get('resume_ckpt', None)
+        ckpt_path = self.config['training'].get('resume_ckpt', None)
         if ckpt_path == 'auto':
             # Find latest checkpoint in checkpoint_dir
             checkpoints = list(self.checkpoint_dir.glob('*.ckpt'))

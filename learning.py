@@ -35,17 +35,17 @@ test_config = {
         'output_activation': 'sigmoid',
     },
 
-    'resume_ckpt': None,
-    'loss_type': 'huber',
-    'metrics': 'all',
-
     'training': {
+        'resume_ckpt': None,
         'batch_size': 32,
         'learning_rate': 1e-3,
+        'loss_type': 'huber',
         'epochs': 1,
         'accelerator': 'auto',
         'devices': 1,
     },
+
+    'metrics': 'all',
 
     'logging': {
         'log_dir': './LOGS',
