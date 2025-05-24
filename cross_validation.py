@@ -15,8 +15,8 @@ class CrossValidator:
     def __init__(
         self,
         config: Union[str, Dict[str, Any]],  # Accept both path and dict
-        progress_file: str = "cv_progress.json",
-        resume: bool = True
+        progress_file: Union[str, None] = None,
+        resume: bool = True,
     ):
         """
         Initialize cross-validator with configuration
@@ -27,7 +27,7 @@ class CrossValidator:
             resume: Whether to resume from previous progress
         """
         self.config = self._load_config(config)
-        self.progress_file = Path(progress_file)
+        self.progress_file = self._set_progress_file(progress_file)
         self.resume = resume
         self.progress = self._init_progress()
 
@@ -42,6 +42,14 @@ class CrossValidator:
             raise TypeError("Config must be file path or dictionary")
         
         return self._validate_config(cfg)
+    
+    def _set_progress_file(self, progress_file):
+        if progress_file is None:
+            filename = self.config['master_name'] + '_cv_progress.json'
+            log_dir = Path(self.config['base_config']['logging']['log_dir']) / self.config['master_name']
+            return log_dir / filename
+        else:
+            return Path(progress_file)
 
     def _validate_config(self, config: Dict) -> Dict:
         """Validate configuration structure"""
@@ -139,7 +147,7 @@ class CrossValidator:
         # Prepare base configuration
         base_config = self.config['base_config']
         data_info = get_subset_info(
-            subset=self.config['crossval_settings'].get('dataset_subset', 'train'),
+            subset=self.config['crossval_settings'].get('dataset_subset'),
             datadir=base_config['data']['datadir']
         )
         
@@ -163,12 +171,17 @@ class CrossValidator:
                     experiment_config = self._update_config_for_fold(
                         base_config, params, fold
                     )
-                    experiment_config['version'] = experiment_id
-                    experiment_config['resume_ckpt'] = 'auto'
+                    experiment_config['experiment_name'] = f"{self.config['master_name']}_{experiment_id}"
+                    experiment_config['logging']['log_dir'] = str(
+                        Path(base_config['logging']['log_dir']) / self.config['master_name']
+                    )
+                    experiment_config['training']['resume_ckpt'] = 'auto'
                     
                     # Run experiment
                     experiment = BatteryExperiment(experiment_config)
                     experiment.run()
+                    _ = experiment.analyze_results('train', savefig=True)
+                    _ = experiment.analyze_results('val', savefig=True)
                     
                     # Record success
                     self.progress[experiment_id] = True
@@ -181,10 +194,61 @@ class CrossValidator:
 
     def _save_progress(self):
         """Save progress to file with atomic write"""
+        # Create parent directories if they don't exist
+        self.progress_file.parent.mkdir(parents=True, exist_ok=True)
+        
         temp_file = self.progress_file.with_suffix('.tmp')
         with open(temp_file, 'w') as f:
             json.dump(self.progress, f, indent=2)
         temp_file.rename(self.progress_file)
+
+CV_TEST_CONFIG_DICT = {
+    'master_name': 'cv_test_experiment',
+    'base_config': {
+        'experiment_name': None,
+        'seed': 42,
+        'data': {
+            'datadir': './DATA/dataset_v5_ts_npz/',
+            'normalization': {'x': None, 'y': 'minmax_zero_one'},
+            'n_diff': 0,
+        },
+        'model': {
+            'input_size': 2,
+            'cnn_hidden_dim': 32,
+            'cnn_channels': [4, 8, 16],
+            'lstm_hidden_size': 32,
+            'num_layers': 1,
+            'output_size': 1,
+            'dropout': 0.,
+            'regressor_hidden_dim': 1024,
+            'output_activation': 'sigmoid',
+        },
+        'training': {
+            'resume_ckpt': None,
+            'batch_size': 32,
+            'learning_rate': 1e-3,
+            'loss_type': 'huber',
+            'epochs': 1,
+            'accelerator': 'auto',
+            'devices': 1,
+        },
+        'metrics': 'all',
+        'logging': {
+            'log_dir': './LOGS/cross-validation/',
+            'progress_bar': True,
+        }
+    },
+    'hyperparam_grid': {
+        'model': {
+            'cnn_hidden_dim': [16, 32],
+        },
+    },
+    'crossval_settings': {
+        'n_splits': 2,
+        'method': 'regular',
+        'dataset_subset': 'small',
+    }
+}
 
 # Usage examples
 if __name__ == '__main__':
@@ -212,45 +276,6 @@ if __name__ == '__main__':
         print('config file was not specified in args')
 
     # Example 2: From Python dictionary
-    cv_config_dict = {
-        'base_config': {
-            'experiment_name': 'cv_from_dict',
-            'seed': 42,
-            'data': {
-                'datadir': './DATA/dataset_v5_ts_npz/',
-                'normalization': {'x': None, 'y': 'minmax_zero_one'},
-                'n_diff': 0,
-            },
-            'model': {
-                'input_size': 2,
-                'lstm_hidden_size': 32,
-                'num_layers': 1,
-                'output_size': 1,
-                'dropout': 0.,
-                'regressor_hidden_dim': 1024,
-                'output_activation': 'sigmoid',
-            },
-            'training': {
-                'epochs': 50,
-                'accelerator': 'auto',
-                'devices': 1,
-            },
-            'logging': {
-                'log_dir': './LOGS',
-                'progress_bar': True,
-            }
-        },
-        'hyperparam_grid': {
-            'training': {
-                'learning_rate': [1e-3, 1e-4],
-            }
-        },
-        'crossval_settings': {
-            'n_splits': 3,
-            'method': 'regular',
-        }
-    }
-
     # Uncomment to run from dict
-    # validator = CrossValidator(config=cv_config_dict)
-    # validator.run()
+    validator = CrossValidator(config=CV_TEST_CONFIG_DICT)
+    validator.run()
