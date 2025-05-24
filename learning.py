@@ -19,7 +19,7 @@ test_config = {
                     'small_NMC15',
                 ],
         'val': ['small_LFP5', 'small_NMC11'],
-        'test': None,
+        #'test': None,
         'normalization': {'x': None, 'y': 'minmax_zero_one'},
         'n_diff': 0,
     },

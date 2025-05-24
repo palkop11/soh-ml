@@ -80,7 +80,7 @@ class BatteryExperiment:
         )
 
         # Test dataset (optional)
-        if self.config['data']['test']:
+        if self.config['data'].get('test'):
             test_info = get_subset_info(
                 subset = self.config['data']['test'],
                 datadir = self.config['data']['datadir']
