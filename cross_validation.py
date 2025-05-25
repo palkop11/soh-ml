@@ -180,8 +180,7 @@ class CrossValidator:
                     # Run experiment
                     experiment = BatteryExperiment(experiment_config)
                     experiment.run()
-                    _ = experiment.analyze_results('train', savefig=True)
-                    _ = experiment.analyze_results('val', savefig=True)
+                    experiment.analyze_results()
                     
                     # Record success
                     self.progress[experiment_id] = True

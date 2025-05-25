@@ -87,8 +87,7 @@ def run_experiment(
     results = experiment.run()
 
     # Generate analysis plots
-    _ = experiment.analyze_results('train', savefig=savefig)
-    _ = experiment.analyze_results('val', savefig=savefig)
+    experiment.analyze_results()
     print('metrics on train:')
     train_metrics = experiment.calculate_metrics('train')
     print('metrics on val:')

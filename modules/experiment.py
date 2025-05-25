@@ -200,77 +200,102 @@ class BatteryExperiment:
             model = self.pipeline,
             dataloaders = dataloader, )
 
-    def analyze_results(self, dataset_type='val', savefig=False, xylims=None):
-        """Generate predictions and plots with dynamic metrics"""
+    def analyze_results(
+        self, 
+        datasets = ['train', 'val'], 
+        savefig=True, 
+        plot=False, 
+        xylims=None,
+    ):
+        """Generate predictions and plots for train and val sets in subplots"""
         self.pipeline.eval()
-        dataloader = {
-            'train': self.datamodule.train_dataloader(),
-            'val': self.datamodule.val_dataloader(),
-            'test': self.datamodule.test_dataloader()
-        }[dataset_type]
+        results = {}
 
-        # Generate predictions
-        y_true, y_pred = [], []
-        with torch.no_grad():
-            for batch in dataloader:
-                x = batch['x'].to(self.pipeline.device)
-                lengths = batch['lengths'].to(self.pipeline.device)
-                preds = self.pipeline(x, lengths)
-                y_true.append(batch['y'].cpu())
-                y_pred.append(preds.cpu())
+        for dataset in datasets:
+            # Get the appropriate dataloader
+            dataloader = getattr(self.datamodule, f'{dataset}_dataloader')()
+            
+            # Generate predictions
+            y_true, y_pred = [], []
+            with torch.no_grad():
+                for batch in dataloader:
+                    x = batch['x'].to(self.pipeline.device)
+                    lengths = batch['lengths'].to(self.pipeline.device)
+                    preds = self.pipeline(x, lengths)
+                    y_true.append(batch['y'].cpu())
+                    y_pred.append(preds.cpu())
 
-        y_true = torch.cat(y_true)
-        y_pred = torch.cat(y_pred)
+            y_true = torch.cat(y_true)
+            y_pred = torch.cat(y_pred)
 
-        # Denormalize
-        y_true_denorm = self.train_ds.denormalize['y'](y_true)
-        y_pred_denorm = self.train_ds.denormalize['y'](y_pred)
+            # Denormalize using training dataset stats
+            y_true_denorm = self.train_ds.denormalize['y'](y_true)
+            y_pred_denorm = self.train_ds.denormalize['y'](y_pred)
 
-        # Calculate metrics using pipeline's metric classes
-        metrics = {}
-        for name, metric_cls in self.pipeline.metric_classes.items():
-            metric = metric_cls().to(y_pred_denorm.device)
-            metrics[name] = metric(y_pred_denorm, y_true_denorm).item()
+            # Calculate metrics
+            metrics = {}
+            for name, metric_cls in self.pipeline.metric_classes.items():
+                metric = metric_cls().to(y_pred_denorm.device)
+                metrics[name] = metric(y_pred_denorm, y_true_denorm).item()
 
-        # Create figure
-        plt.figure(figsize=(10, 8))
-        
-        # Main plot
-        plt.scatter(y_true_denorm, y_pred_denorm, alpha=0.5)
-        plt.plot([y_true_denorm.min(), y_true_denorm.max()],
-                [y_true_denorm.min(), y_true_denorm.max()], 'r--')
-        plt.xlabel('True Values')
-        plt.ylabel('Predictions')
-        plt.title(f'{dataset_type.capitalize()} Set: True vs Predicted')
+            results[dataset] = {
+                'y_true': y_true_denorm,
+                'y_pred': y_pred_denorm,
+                'metrics': metrics
+            }
 
-        # Format metrics text
-        metric_text = "\n".join([f"{name.upper()}: {val:.4f}" for name, val in metrics.items()])
+        # Create figure with subplots
+        fig, axes = plt.subplots(nrows=1, ncols=len(datasets), figsize=(20, 8))
+        axes = axes.flatten()
+
+        for ax, dataset in zip(axes, datasets):
+            data = results[dataset]
+            y_true_denorm = data['y_true']
+            y_pred_denorm = data['y_pred']
+            metrics = data['metrics']
+
+            # Scatter plot
+            ax.scatter(y_true_denorm, y_pred_denorm, alpha=0.5)
+            ax.plot([y_true_denorm.min(), y_true_denorm.max()],
+                    [y_true_denorm.min(), y_true_denorm.max()], 'r--')
+            ax.set_xlabel('True Values')
+            ax.set_ylabel('Predictions')
+            ax.set_title(f'{dataset.capitalize()} Set: True vs Predicted')
+
+            # Add metrics text
+            metric_text = "\n".join([f"{name.upper()}: {val:.4f}" for name, val in metrics.items()])
+            ax.text(0.05, 0.95, metric_text, transform=ax.transAxes,
+                    verticalalignment='top', horizontalalignment='left',
+                    bbox=dict(facecolor='white', alpha=0.5))
+
+            # Apply axis limits if specified
+            if xylims is not None:
+                ax.set_xlim(xylims)
+                ax.set_ylim(xylims)
 
         # Add experiment info
         exp_name = self.config['experiment_name']
         version = getattr(self.logger, 'version', 'unknown')
-        plt.suptitle(
+        fig.suptitle(
             f"Experiment: {exp_name}\n"
-            f"Version: {version}\n"
-            f"Metrics:\n{metric_text}",
+            f"Version: {version}",
             y=1.02, 
             fontsize=10,
             ha='left',
             x=0.15
         )
 
-        if xylims is not None:
-            plt.xlim(xylims)
-            plt.ylim(xylims)
-        
         plt.tight_layout()
 
+        # Save and show options
         if savefig:
+            fig_filename = f"{exp_name}_version_{version}_{'_'.join(datasets)}.png"
             plt.savefig(
-                self.exp_dir / f'{dataset_type}_predictions.png',
+                self.exp_dir / fig_filename,
                 bbox_inches='tight',
                 dpi=300
             )
-        plt.show()
-
-        return y_true_denorm.numpy(), y_pred_denorm.numpy(), metrics
+        if plot:
+            plt.show()
+        else:
+            plt.close()
