@@ -145,46 +145,65 @@ class BatteryExperiment:
     def get_ckpt_path(self):
         # Checkpoint path (specify in config or auto-detect latest)
         ckpt_path = self.config['training']['resume_ckpt']
+        
         if ckpt_path == 'auto':
             # Find latest checkpoint in checkpoint_dir
             checkpoints = list(self.checkpoint_dir.glob('*.ckpt'))
             if checkpoints:
-                ckpt_path = max(checkpoints, key=lambda x: x.stat().st_ctime)
+                ckpt_path = max(checkpoints, key=lambda x: x.stat().st_mtime)
             else:
                 ckpt_path = None
 
-        elif ckpt_path == 'from_previous_version':
-            # Handle loading from previous experiment version
+        elif ckpt_path == 'from_previous':
             parent_dir = Path(self.config['logging']['log_dir']) / self.config['experiment_name']
             current_version = self.logger.version
             
-            # Handle both integer and "version_X" format versions
             try:
-                version_number = int(current_version.split('_')[-1]) if isinstance(current_version, str) else current_version
-                previous_version = max(version_number - 1, 0)
+                if isinstance(current_version, str):
+                    version_number = int(current_version.split('_')[-1])
+                else:
+                    version_number = current_version
             except (ValueError, TypeError):
-                ckpt_path = None
-                previous_version = None
+                version_number = None
+                print("Warning: Unable to parse current version. Cannot resume from previous versions.")
+                return None
 
-            if previous_version is not None and previous_version >= 0:
-                previous_version_dir = parent_dir / f"version_{previous_version}"
-                checkpoint_dir = previous_version_dir / 'checkpoints'
-                
-                if previous_version_dir.exists() and checkpoint_dir.exists():
+            if version_number is None or version_number < 1:
+                return None  # No previous versions available
+
+            # Collect all existing version directories
+            version_dirs = []
+            for dir_path in parent_dir.iterdir():
+                if dir_path.is_dir() and dir_path.name.startswith('version_'):
+                    parts = dir_path.name.split('_')
+                    if len(parts) == 2:
+                        try:
+                            v = int(parts[1])
+                            version_dirs.append(v)
+                        except ValueError:
+                            continue  # Skip non-integer versions
+
+            # Filter versions less than current and sort descending
+            previous_versions = [v for v in version_dirs if v < version_number]
+            previous_versions.sort(reverse=True)
+            
+            ckpt_path = None
+            for v in previous_versions:
+                version_dir = parent_dir / f"version_{v}"
+                checkpoint_dir = version_dir / 'checkpoints'
+                if checkpoint_dir.exists():
                     checkpoints = list(checkpoint_dir.glob('*.ckpt'))
                     if checkpoints:
-                        ckpt_path = max(checkpoints, key=lambda x: x.stat().st_ctime)
-                        return
-                
-            # Fallback to no checkpoint if any condition fails
-            ckpt_path = None
+                        ckpt_path = max(checkpoints, key=lambda x: x.stat().st_mtime)
+                        break  # Found the highest version with checkpoints
 
-        elif ckpt_path:
+        elif ckpt_path:  # Direct path case (e.g., 'path/to/checkpoint.ckpt')
             ckpt_path = Path(ckpt_path)
             if not ckpt_path.exists():
                 raise FileNotFoundError(f"Checkpoint {ckpt_path} not found!")
-        
-        return ckpt_path
+            
+        print(f'\nckpt_path is {ckpt_path}\n')
+        return ckpt_path  # Final return (handles all cases)
 
     def run(self):
         # Save config for reproducibility
