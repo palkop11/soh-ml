@@ -105,7 +105,7 @@ class CrossValidator:
             df=data_info,
             n_splits=cv_settings.get('n_splits', 5),
             method=cv_settings.get('method', 'stratified'),
-            strat_label=cv_settings.get('strat_label', 'chem'),
+            strat_label=cv_settings['strat_label'],
             verbose=cv_settings.get('verbose', False)
         )
 
@@ -207,7 +207,7 @@ class CrossValidator:
             json.dump(self.progress, f, indent=2)
         temp_file.rename(self.progress_file)
 
-CV_TEST_CONFIG_DICT = {
+cv_test_config_dict = {
     'master_name': 'cv_test_experiment',
     'base_config': {
         'experiment_name': None,
@@ -232,8 +232,8 @@ CV_TEST_CONFIG_DICT = {
             'resume_ckpt': None,
             'batch_size': 32,
             'learning_rate': 1e-3,
-            'loss_type': 'huber',
-            'epochs': 1,
+            'loss_type': 'huber1.0',
+            'epochs': 2,
             'accelerator': 'auto',
             'devices': 1,
         },
@@ -252,7 +252,8 @@ CV_TEST_CONFIG_DICT = {
     },
     'crossval_settings': {
         'n_splits': 2,
-        'method': 'regular',
+        'method': 'stratified',
+        'strat_label': 'chem',
         'dataset_subset': 'small',
     }
 }
@@ -284,5 +285,5 @@ if __name__ == '__main__':
 
     # Example 2: From Python dictionary
     # Uncomment to run from dict
-    validator = CrossValidator(config=CV_TEST_CONFIG_DICT)
+    validator = CrossValidator(config=cv_test_config_dict)
     validator.run()
