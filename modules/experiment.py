@@ -141,6 +141,50 @@ class BatteryExperiment:
             enable_progress_bar=self.config['logging']['progress_bar'],
             deterministic=True
         )
+    
+    def get_ckpt_path(self):
+        # Checkpoint path (specify in config or auto-detect latest)
+        ckpt_path = self.config['training']['resume_ckpt']
+        if ckpt_path == 'auto':
+            # Find latest checkpoint in checkpoint_dir
+            checkpoints = list(self.checkpoint_dir.glob('*.ckpt'))
+            if checkpoints:
+                ckpt_path = max(checkpoints, key=lambda x: x.stat().st_ctime)
+            else:
+                ckpt_path = None
+
+        elif ckpt_path == 'from_previous_version':
+            # Handle loading from previous experiment version
+            parent_dir = Path(self.config['logging']['log_dir']) / self.config['experiment_name']
+            current_version = self.logger.version
+            
+            # Handle both integer and "version_X" format versions
+            try:
+                version_number = int(current_version.split('_')[-1]) if isinstance(current_version, str) else current_version
+                previous_version = max(version_number - 1, 0)
+            except (ValueError, TypeError):
+                ckpt_path = None
+                previous_version = None
+
+            if previous_version is not None and previous_version >= 0:
+                previous_version_dir = parent_dir / f"version_{previous_version}"
+                checkpoint_dir = previous_version_dir / 'checkpoints'
+                
+                if previous_version_dir.exists() and checkpoint_dir.exists():
+                    checkpoints = list(checkpoint_dir.glob('*.ckpt'))
+                    if checkpoints:
+                        ckpt_path = max(checkpoints, key=lambda x: x.stat().st_ctime)
+                        return
+                
+            # Fallback to no checkpoint if any condition fails
+            ckpt_path = None
+
+        elif ckpt_path:
+            ckpt_path = Path(ckpt_path)
+            if not ckpt_path.exists():
+                raise FileNotFoundError(f"Checkpoint {ckpt_path} not found!")
+        
+        return ckpt_path
 
     def run(self):
         # Save config for reproducibility
@@ -154,19 +198,7 @@ class BatteryExperiment:
         self.pipeline = self.create_pipeline()
         self.trainer = self.create_trainer()
 
-        # Checkpoint path (specify in config or auto-detect latest)
-        ckpt_path = self.config['training']['resume_ckpt']
-        if ckpt_path == 'auto':
-            # Find latest checkpoint in checkpoint_dir
-            checkpoints = list(self.checkpoint_dir.glob('*.ckpt'))
-            if checkpoints:
-                ckpt_path = max(checkpoints, key=lambda x: x.stat().st_ctime)
-            else:
-                ckpt_path = None
-        elif ckpt_path:
-            ckpt_path = Path(ckpt_path)
-            if not ckpt_path.exists():
-                raise FileNotFoundError(f"Checkpoint {ckpt_path} not found!")
+        ckpt_path = self.get_ckpt_path()
 
         # Training (resumes from checkpoint if provided)
         self.trainer.fit(

@@ -37,7 +37,7 @@ test_config = {
     },
 
     'training': {
-        'resume_ckpt': None,
+        'resume_ckpt': 'from_previous_version',
         'batch_size': 32,
         'learning_rate': 1e-3,
         'loss_type': 'huber',
