@@ -1,3 +1,5 @@
+import re
+
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
@@ -132,78 +134,100 @@ class BatteryExperiment:
             devices=self.config['training']['devices'],
             callbacks=[
                 pl.callbacks.ModelCheckpoint(
-                    dirpath=self.checkpoint_dir,  # Now inside versioned dir
+                    dirpath=self.checkpoint_dir,
                     monitor='val_loss',
                     mode='min',
-                    save_top_k=1
+                    save_top_k=1,
+                    filename='best-{epoch}-{val_loss:.3f}',  # Custom filename for best
+                    save_last=True,  # Saves 'last.ckpt' automatically
                 )
             ],
             enable_progress_bar=self.config['logging']['progress_bar'],
             deterministic=True
         )
-    
+    def _get_current_version_number(self):
+        current_version = self.logger.version
+        if isinstance(current_version, str):
+            # Handle versions like "version_0" or "v1"
+            try:
+                return int(current_version.split('_')[-1])
+            except (ValueError, IndexError):
+                return None
+        return current_version  # Assume integer or None
+
+    def _get_previous_version_dirs(self, parent_dir, current_version):
+        version_dirs = []
+        for dir_path in parent_dir.iterdir():
+            if dir_path.is_dir() and dir_path.name.startswith('version_'):
+                try:
+                    v = int(dir_path.name.split('_')[1])
+                    if v < current_version:
+                        version_dirs.append((v, dir_path))
+                except (IndexError, ValueError):
+                    continue
+        # Sort by version ascending (oldest first)
+        version_dirs.sort(key=lambda x: x[0])
+        return version_dirs
+
     def get_ckpt_path(self):
-        # Checkpoint path (specify in config or auto-detect latest)
         ckpt_path = self.config['training']['resume_ckpt']
         
         if ckpt_path == 'auto':
-            # Find latest checkpoint in checkpoint_dir
+            # Find latest checkpoint in current checkpoint_dir
             checkpoints = list(self.checkpoint_dir.glob('*.ckpt'))
-            if checkpoints:
-                ckpt_path = max(checkpoints, key=lambda x: x.stat().st_mtime)
-            else:
-                ckpt_path = None
+            ckpt_path = max(checkpoints, key=lambda x: x.stat().st_mtime) if checkpoints else None
 
-        elif ckpt_path == 'from_previous':
+        elif ckpt_path in ['from_last', 'from_best']:
             parent_dir = Path(self.config['logging']['log_dir']) / self.config['experiment_name']
-            current_version = self.logger.version
+            current_version = self._get_current_version_number()
             
-            try:
-                if isinstance(current_version, str):
-                    version_number = int(current_version.split('_')[-1])
-                else:
-                    version_number = current_version
-            except (ValueError, TypeError):
-                version_number = None
-                print("Warning: Unable to parse current version. Cannot resume from previous versions.")
-                return None
+            if current_version is None or current_version < 1:
+                ckpt_path = None
+            else:
+                # Get all previous version directories (sorted ascending)
+                version_dirs = self._get_previous_version_dirs(parent_dir, current_version)
+                
+                if ckpt_path == 'from_last':
+                    # Iterate versions descending (newest first)
+                    for v, dir_path in reversed(version_dirs):
+                        last_ckpt = dir_path / 'checkpoints' / 'last.ckpt'
+                        if last_ckpt.exists():
+                            ckpt_path = last_ckpt
+                            break
+                    else:
+                        ckpt_path = None
 
-            if version_number is None or version_number < 1:
-                return None  # No previous versions available
+                elif ckpt_path == 'from_best':
+                    best_ckpts = []
+                    # Collect all best checkpoints from previous versions
+                    for v, dir_path in version_dirs:
+                        checkpoint_dir = dir_path / 'checkpoints'
+                        if checkpoint_dir.exists():
+                            # Match filenames like "best-epoch=5-val_loss=0.123.ckpt"
+                            for ckpt in checkpoint_dir.glob('best-epoch=*-val_loss=*.ckpt'):
+                                match = re.match(
+                                    r'best-epoch=(\d+)-val_loss=([0-9.]+)\.ckpt$',
+                                    ckpt.name
+                                )
+                                if match:
+                                    epoch = int(match.group(1))
+                                    val_loss = float(match.group(2))
+                                    best_ckpts.append((val_loss, epoch, v, ckpt))
+                    
+                    if best_ckpts:
+                        # Sort by val_loss (asc), then epoch (desc), then version (desc)
+                        best_ckpts.sort(key=lambda x: (x[0], -x[1], -x[2]))
+                        ckpt_path = best_ckpts[0][3]
+                    else:
+                        ckpt_path = None
 
-            # Collect all existing version directories
-            version_dirs = []
-            for dir_path in parent_dir.iterdir():
-                if dir_path.is_dir() and dir_path.name.startswith('version_'):
-                    parts = dir_path.name.split('_')
-                    if len(parts) == 2:
-                        try:
-                            v = int(parts[1])
-                            version_dirs.append(v)
-                        except ValueError:
-                            continue  # Skip non-integer versions
-
-            # Filter versions less than current and sort descending
-            previous_versions = [v for v in version_dirs if v < version_number]
-            previous_versions.sort(reverse=True)
-            
-            ckpt_path = None
-            for v in previous_versions:
-                version_dir = parent_dir / f"version_{v}"
-                checkpoint_dir = version_dir / 'checkpoints'
-                if checkpoint_dir.exists():
-                    checkpoints = list(checkpoint_dir.glob('*.ckpt'))
-                    if checkpoints:
-                        ckpt_path = max(checkpoints, key=lambda x: x.stat().st_mtime)
-                        break  # Found the highest version with checkpoints
-
-        elif ckpt_path:  # Direct path case (e.g., 'path/to/checkpoint.ckpt')
+        elif ckpt_path:  # Direct path provided
             ckpt_path = Path(ckpt_path)
             if not ckpt_path.exists():
                 raise FileNotFoundError(f"Checkpoint {ckpt_path} not found!")
-            
+
         print(f'\nckpt_path is {ckpt_path}\n')
-        return ckpt_path  # Final return (handles all cases)
+        return ckpt_path
 
     def run(self):
         # Save config for reproducibility

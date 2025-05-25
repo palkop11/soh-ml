@@ -37,11 +37,11 @@ test_config = {
     },
 
     'training': {
-        'resume_ckpt': 'from_previous',
+        'resume_ckpt': 'from_last',
         'batch_size': 32,
         'learning_rate': 1e-3,
         'loss_type': 'huber',
-        'epochs': 1,
+        'epochs': 20,
         'accelerator': 'auto',
         'devices': 1,
     },
