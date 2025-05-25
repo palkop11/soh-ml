@@ -89,8 +89,7 @@ class BatteryPipeline(pl.LightningModule):
         self,
         model,
         denormalize_y=nn.Identity(),
-        loss_type='mse',  # 'mse', 'huber', 'bce'
-        huber_delta=1.0,  # Only for huber loss
+        loss_type='mse',  # 'mse', 'mae', 'huberX.X', 'bce'
         learning_rate=1e-3,
         metrics=None,
     ):
@@ -100,22 +99,41 @@ class BatteryPipeline(pl.LightningModule):
         self.denormalize_y = denormalize_y
 
         # Configure loss function
-        self.loss_fn = self._get_loss_fn(loss_type, huber_delta)
+        self.loss_fn = self._get_loss_fn(loss_type)
         
         # Configure metrics
 
         # Initialize metrics
         self._init_metrics(metrics)
 
-    def _get_loss_fn(self, loss_type, huber_delta):
-        loss_mapping = {
-            'mse': nn.MSELoss(),
-            'huber': nn.HuberLoss(delta=huber_delta),
-            'bce': nn.BCELoss()
-        }
-        if loss_type not in loss_mapping:
-            raise ValueError(f"Invalid loss_type: {loss_type}. Choose from {list(loss_mapping.keys())}")
-        return loss_mapping[loss_type]
+    def _get_loss_fn(self, loss_type):
+        """
+        Get loss function based on configuration string.
+        Supports:
+        - 'mse' (Mean Squared Error)
+        - 'mae' (Mean Absolute Error)
+        - 'bce' (Binary Cross Entropy)
+        - 'huberX.X' (Huber loss with specified delta, e.g., 'huber1.5')
+        """
+        if loss_type == 'mse':
+            return nn.MSELoss()
+        elif loss_type == 'mae':
+            return nn.L1Loss()  # MAE is also known as L1 loss
+        elif loss_type == 'bce':
+            return nn.BCELoss()
+        elif loss_type.startswith('huber'):
+            # Handle huber loss with dynamic delta
+            suffix = loss_type[len('huber'):]
+            if not suffix:
+                raise ValueError(f"Invalid loss_type: '{loss_type}'. Huber loss requires a delta in the format 'huberX.X'")
+            try:
+                delta = float(suffix)
+            except ValueError:
+                raise ValueError(f"Invalid delta value in loss_type: '{loss_type}'. Expected numeric suffix like 'huber1.0'")
+            return nn.HuberLoss(delta=delta)
+        else:
+            valid_losses = ['mse', 'mae', 'bce', 'huberX.X (e.g., huber1.0)']
+            raise ValueError(f"Invalid loss_type: '{loss_type}'. Choose from {valid_losses}")
 
     def _init_metrics(self, metrics):
         metrics_set = {
