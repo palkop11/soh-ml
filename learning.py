@@ -51,6 +51,8 @@ test_config = {
     'logging': {
         'log_dir': './LOGS',
         'progress_bar': True,
+        'plot': False,
+        'savefig': True,
     }
 }
 

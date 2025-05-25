@@ -235,6 +235,8 @@ CV_TEST_CONFIG_DICT = {
         'logging': {
             'log_dir': './LOGS/cross-validation/',
             'progress_bar': True,
+            'plot': False,
+            'savefig': True,
         }
     },
     'hyperparam_grid': {

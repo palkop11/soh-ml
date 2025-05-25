@@ -202,12 +202,16 @@ class BatteryExperiment:
 
     def analyze_results(
         self, 
-        datasets = ['train', 'val'], 
+        datasets = ['train', 'val'],
+        plot=False,  
         savefig=True, 
-        plot=False, 
         xylims=None,
     ):
-        """Generate predictions and plots for train and val sets in subplots"""
+        """Generate predictions and plots for specified subsets 
+        (train and val by default) in subplots"""
+        plot = self.config['logging']['plot']
+        savefig = self.config['logging']['savefig']
+
         self.pipeline.eval()
         results = {}
 
