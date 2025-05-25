@@ -144,6 +144,12 @@ class CrossValidator:
 
     def run(self):
         """Execute full cross-validation process"""
+        # dump master cv config
+        master_dir = Path(self.config['base_config']['logging']['log_dir']) / self.config['master_name']
+        master_dir.mkdir(parents=True, exist_ok=True)
+        with open(master_dir / f"{self.config['master_name']}_master_config.yaml", 'w') as f:
+            yaml.safe_dump(self.config, f)
+
         # Prepare base configuration
         base_config = self.config['base_config']
         data_info = get_subset_info(
