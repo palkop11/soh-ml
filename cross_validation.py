@@ -232,6 +232,7 @@ cv_test_config_dict = {
             'resume_ckpt': None,
             'batch_size': 32,
             'learning_rate': 1e-3,
+            'scheduler': 'reduce_on_plateu',
             'loss_type': 'huber1.0',
             'epochs': 2,
             'accelerator': 'auto',

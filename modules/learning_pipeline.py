@@ -89,9 +89,14 @@ class BatteryPipeline(pl.LightningModule):
         self,
         model,
         denormalize_y=nn.Identity(),
-        loss_type='mse',  # 'mse', 'mae', 'huberX.X', 'bce'
+        loss_type='mse',
         learning_rate=1e-3,
         metrics=None,
+        # Scheduler parameters
+        scheduler_type: str | None = None,  # 'reduce_on_plateu', 'cosine', or None
+        plateau_factor: float = 0.5,        # For 'reduce_on_plateu'
+        plateau_patience: int = 5,          # For 'reduce_on_plateu'
+        cosine_t_max: int = 50,             # For 'cosine' (epochs)
     ):
         super().__init__()
         self.save_hyperparameters(ignore=['model', 'denormalize_y'])
@@ -102,8 +107,6 @@ class BatteryPipeline(pl.LightningModule):
         self.loss_fn = self._get_loss_fn(loss_type)
         
         # Configure metrics
-
-        # Initialize metrics
         self._init_metrics(metrics)
 
     def _get_loss_fn(self, loss_type):
@@ -229,4 +232,35 @@ class BatteryPipeline(pl.LightningModule):
         return self._log_metrics(self.test_metrics)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+        optimizer = torch.optim.Adam(
+            self.parameters(), 
+            lr=self.hparams.learning_rate
+        )
+
+        if self.hparams.scheduler_type == 'reduce_on_plateu':
+            scheduler = {
+                'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer,
+                    mode='min',
+                    factor=self.hparams.plateau_factor,
+                    patience=self.hparams.plateau_patience
+                ),
+                'monitor': 'val_loss',
+                'interval': 'epoch',
+                'frequency': 1
+            }
+            return {"optimizer": optimizer, "lr_scheduler": scheduler}
+
+        elif self.hparams.scheduler_type == 'cosine':
+            scheduler = {
+                'scheduler': torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=self.hparams.cosine_t_max
+                ),
+                'interval': 'epoch',
+                'frequency': 1
+            }
+            return {"optimizer": optimizer, "lr_scheduler": scheduler}
+
+        # No scheduler
+        return optimizer

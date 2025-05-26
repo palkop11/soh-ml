@@ -123,6 +123,7 @@ class BatteryExperiment:
             denormalize_y=self.train_ds.denormalize['y'],
             loss_type=self.config['training']['loss_type'], # 'mse', 'huber', 'bce'
             learning_rate=self.config['training']['learning_rate'],
+            scheduler_type=self.config['training']['scheduler'],
             metrics = self.config['metrics'], # list like ['mse', 'mae', 'mape', 'r2', 'rcc']
         )
 

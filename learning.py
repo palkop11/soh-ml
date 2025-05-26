@@ -40,6 +40,7 @@ test_config = {
         'resume_ckpt': 'from_last',
         'batch_size': 32,
         'learning_rate': 1e-3,
+        'scheduler': 'reduce_on_plateu',
         'loss_type': 'huber1.0',
         'epochs': 5,
         'accelerator': 'auto',
