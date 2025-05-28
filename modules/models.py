@@ -2,51 +2,82 @@ import torch.nn as nn
 import torch
 from torchinfo import summary
 
-class UnifiedBatteryModel(nn.Module):
+class CNN_LSTM_model(nn.Module):
     def __init__(self,
                  input_size=2,
-                 cnn_hidden_dim=16,
-                 cnn_channels=[4, 8, 16],
+                 #cnn_hidden_dim=16,  # Now used only if not part of cnn_channels
+                 cnn_channels=[4, 8, 16],  # Last element can be final channel dim
+                 cnn_kernel_sizes=None,
+                 cnn_strides=None,
+                 cnn_paddings=None,
+                 cnn_use_maxpool=None,  # List of booleans for maxpool per block
                  lstm_hidden_size=64,
                  num_layers=2,
                  output_size=1,
-                 dropout_prob=0.25,
-                 regressor_hidden_dim=None,
+                 dropout_prob=0.,
+                 regressor_hidden_dim=1024,
                  output_activation='sigmoid'):
         super().__init__()
-        self.use_cnn = cnn_hidden_dim is not None and cnn_hidden_dim > 0
+        self.use_cnn = len(cnn_channels) > 0  # CNN enabled if channels provided
+        
+        # CNN configuration
         self.cnn_channels = cnn_channels
+
         self.compress_factor = 1
 
-        # CNN layers if enabled
+        # Set default CNN parameters if not provided
+        default_kernels = [5] + [3] * (len(cnn_channels) - 1)
+        default_strides = [2] * len(cnn_channels)
+        default_paddings = [2] + [1] * (len(cnn_channels) - 1)
+        default_maxpool = [True] * len(cnn_channels)
+
+        self.cnn_kernel_sizes = cnn_kernel_sizes or default_kernels
+        self.cnn_strides = cnn_strides or default_strides
+        self.cnn_paddings = cnn_paddings or default_paddings
+        self.cnn_use_maxpool = cnn_use_maxpool or default_maxpool
+
+        # Parameter safety checks
+        assert len(self.cnn_kernel_sizes) == len(self.cnn_channels)
+        assert len(self.cnn_strides) == len(self.cnn_channels)
+        assert len(self.cnn_paddings) == len(self.cnn_channels)
+        assert len(self.cnn_use_maxpool) == len(self.cnn_channels)
+
+        # CNN layers
         if self.use_cnn:
             cnn_layers = []
             in_channels = input_size
-            for i, out_channels in enumerate(cnn_channels):
-                cnn_layers.extend([
-                    nn.Conv1d(in_channels, out_channels, kernel_size=5 if i == 0 else 3, stride=2, padding=2 if i == 0 else 1),
-                    nn.BatchNorm1d(out_channels),
-                    nn.ReLU(),
-                    nn.MaxPool1d(kernel_size=2, stride=2)
-                ])
+            
+            # Build each CNN block
+            for i, out_channels in enumerate(self.cnn_channels):
+                # Conv layer
+                conv = nn.Conv1d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=self.cnn_kernel_sizes[i],
+                    stride=self.cnn_strides[i],
+                    padding=self.cnn_paddings[i]
+                )
+                cnn_layers.append(conv)
+                cnn_layers.append(nn.BatchNorm1d(out_channels))
+                cnn_layers.append(nn.ReLU())
+                
+                # Update compression factor
+                self.compress_factor *= self.cnn_strides[i]
+                
+                # Optional max pooling
+                if self.cnn_use_maxpool[i]:
+                    cnn_layers.append(nn.MaxPool1d(kernel_size=2, stride=2))
+                    self.compress_factor *= 2  # Max pool reduces by 2x
+                
                 in_channels = out_channels
-                self.compress_factor *= 4  # Each block (conv+pool) reduces length by 4x
 
-            cnn_layers.append(
-                nn.Conv1d(in_channels, cnn_hidden_dim, kernel_size=3, stride=2, padding=1)
-            )
-            cnn_layers.extend([
-                nn.BatchNorm1d(cnn_hidden_dim),
-                nn.ReLU(),
-            ])
-            self.compress_factor *= 2  # Final conv reduces by 2x
             self.cnn = nn.Sequential(*cnn_layers)
             self.cnn_dropout = nn.Dropout(dropout_prob)
-            lstm_input_size = cnn_hidden_dim
+            lstm_input_size = self.cnn_channels[-1]  # Use last channel dimension
         else:
             lstm_input_size = input_size
 
-        # LSTM
+        # LSTM remains unchanged
         self.lstm = nn.LSTM(
             input_size=lstm_input_size,
             hidden_size=lstm_hidden_size,
@@ -58,7 +89,7 @@ class UnifiedBatteryModel(nn.Module):
 
         self.final_dropout = nn.Dropout(dropout_prob)
 
-        # Regressor
+        # Regressor remains unchanged
         if regressor_hidden_dim:
             self.regressor = nn.Sequential(
                 nn.Linear(lstm_hidden_size, regressor_hidden_dim),
@@ -70,6 +101,7 @@ class UnifiedBatteryModel(nn.Module):
         
         self.output_activation = self._get_activation(output_activation)
 
+    # _get_activation remains unchanged
     def _get_activation(self, activation_name):
         if activation_name == 'tanh':
             return nn.Tanh()
@@ -80,6 +112,7 @@ class UnifiedBatteryModel(nn.Module):
         else:
             return nn.Identity()
 
+    # forward pass remains mostly unchanged
     def forward(self, x, lengths):
         if self.use_cnn:
             # Process through CNN
@@ -87,9 +120,30 @@ class UnifiedBatteryModel(nn.Module):
             x = self.cnn(x)
             x = self.cnn_dropout(x)
             x = x.permute(0, 2, 1)
-            compressed_lengths = torch.div(lengths, self.compress_factor, rounding_mode='floor').clamp(min=1)
+            
+            # PRECISE LENGTH CALCULATION
+            compressed_lengths = lengths.clone()
+            for i in range(len(self.cnn_channels)):
+                # Conv layer length calculation
+                compressed_lengths = (
+                    compressed_lengths + 
+                    2 * self.cnn_paddings[i] - 
+                    (self.cnn_kernel_sizes[i] - 1) - 1
+                ) // self.cnn_strides[i] + 1
+                
+                # MaxPool layer calculation
+                if self.cnn_use_maxpool[i]:
+                    compressed_lengths = (
+                        compressed_lengths + 
+                        2 * 0 -  # padding=0
+                        (2 - 1) - 1  # kernel_size=2, dilation=1
+                    ) // 2 + 1
+            
+            compressed_lengths = compressed_lengths.clamp(min=1)
         else:
             compressed_lengths = lengths
+    
+    # Pack and process (rest of code unchanged)
         
         # Pack and process
         packed = nn.utils.rnn.pack_padded_sequence(
@@ -108,7 +162,7 @@ class UnifiedBatteryModel(nn.Module):
         output = self.output_activation(output)
         return output.reshape(-1, 1)
     
-def make_model_summary(model, seq_lengths = [400, 16000]):
+def make_model_summary(model, seq_lengths = [379, 16674]):
     for seq_length in seq_lengths:
         batch_size = 1
         input_size = 2

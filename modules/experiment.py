@@ -14,7 +14,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from .data_splitting import get_subset_info
 from .datasets import DataSetCreation
 from .learning_pipeline import BatteryDataModule, BatteryPipeline, collate_fn
-from .models import UnifiedBatteryModel, make_model_summary
+from .models import CNN_LSTM_model, make_model_summary
 
 class BatteryExperiment:
     def __init__(self, config):
@@ -97,14 +97,20 @@ class BatteryExperiment:
     def create_model(self):
         model_config = self.config['model']
         
-        return UnifiedBatteryModel(
+        return CNN_LSTM_model(
             input_size=model_config['input_size'],
-            cnn_hidden_dim=model_config['cnn_hidden_dim'],
+
             cnn_channels=model_config['cnn_channels'],
+            cnn_kernel_sizes=model_config['cnn_kernel_sizes'],
+            cnn_strides=model_config['cnn_strides'],
+            cnn_paddings=model_config['cnn_paddings'],
+            cnn_use_maxpool=model_config['cnn_use_maxpool'],
+            
             lstm_hidden_size=model_config['lstm_hidden_size'],
             num_layers=model_config['num_layers'],
+            
             output_size=model_config['output_size'],
-            dropout_prob=model_config['dropout'],
+            dropout_prob=model_config['dropout_prob'],
             regressor_hidden_dim=model_config['regressor_hidden_dim'],
             output_activation=model_config['output_activation'],
         )

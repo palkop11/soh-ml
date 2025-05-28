@@ -21,12 +21,18 @@ test_config = {
 
     'model': {
         'input_size': 2,
-        'cnn_hidden_dim': 32,
-        'cnn_channels': [4, 8, 16],
-        'lstm_hidden_size': 32,
-        'num_layers': 1,
+
+        'cnn_channels': [4, 8, 16],  # Last element can be final channel dim
+        'cnn_kernel_sizes': None, # None for default
+        'cnn_strides': None, # None for default
+        'cnn_paddings': None, # None for default
+        'cnn_use_maxpool': None,  # List of booleans for maxpool per block
+
+        'lstm_hidden_size': 64,
+        'num_layers': 2,
+        
         'output_size': 1,
-        'dropout': 0.,
+        'dropout_prob': 0.,
         'regressor_hidden_dim': 1024,
         'output_activation': 'sigmoid',
     },
@@ -59,7 +65,7 @@ cv_test_config_dict = {
     'base_config': test_config,
     'hyperparam_grid': {
         'model': {
-            'cnn_hidden_dim': [16, 32],
+            'dropout_prob': [0., 0.25],
         },
     },
     'crossval_settings': {
