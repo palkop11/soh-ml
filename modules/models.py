@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+from torchinfo import summary
 
 class UnifiedBatteryModel(nn.Module):
     def __init__(self,
@@ -106,3 +107,19 @@ class UnifiedBatteryModel(nn.Module):
         output = self.regressor(last_hidden)
         output = self.output_activation(output)
         return output.reshape(-1, 1)
+    
+def make_model_summary(model, seq_lengths = [400, 16000]):
+    for seq_length in seq_lengths:
+        batch_size = 1
+        input_size = 2
+        dummy_x = torch.randn(batch_size, seq_length, input_size)
+        dummy_lengths = torch.tensor([seq_length])  # Example: all sequences are full-length
+
+        print('\ntensor shape for torchinfo model summary:', list(dummy_x.shape))
+
+        summary(
+            model,
+            input_data={'x': dummy_x, 'lengths': dummy_lengths}
+        )
+
+        #print(output_summary, '\n')

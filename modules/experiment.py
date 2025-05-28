@@ -1,19 +1,20 @@
 import re
-
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import TensorBoardLogger
-import torch
-import yaml
 from pathlib import Path
+
 
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+import pytorch_lightning as pl
+import torch
+import yaml
+
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from .data_splitting import get_subset_info
 from .datasets import DataSetCreation
 from .learning_pipeline import BatteryDataModule, BatteryPipeline, collate_fn
-from .models import UnifiedBatteryModel
+from .models import UnifiedBatteryModel, make_model_summary
 
 class BatteryExperiment:
     def __init__(self, config):
@@ -144,6 +145,7 @@ class BatteryExperiment:
                 )
             ],
             enable_progress_bar=self.config['logging']['progress_bar'],
+            enable_model_summary=False,
             deterministic=True
         )
     def _get_current_version_number(self):
@@ -243,6 +245,12 @@ class BatteryExperiment:
         self.trainer = self.create_trainer()
 
         ckpt_path = self.get_ckpt_path()
+
+        if self.config['logging'].get('torchinfo_model_summary'):
+            try:
+                make_model_summary(self.model)
+            except Exception as e:
+                print(f"\nWarning: torchinfo summary of model resulted in exception:\n{e}\n")
 
         # Training (resumes from checkpoint if provided)
         self.trainer.fit(

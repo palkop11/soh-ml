@@ -78,6 +78,7 @@ tensorboard==2.19.0
 tensorboard-data-server==0.7.2
 threadpoolctl==3.6.0
 torch==2.6.0
+torchinfo==1.8.0
 torchmetrics==1.7.1
 tornado==6.5
 tqdm==4.67.1
