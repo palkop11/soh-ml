@@ -143,8 +143,8 @@ class BatteryExperiment:
             callbacks=[
                 pl.callbacks.ModelCheckpoint(
                     dirpath=self.checkpoint_dir,
-                    monitor='val_loss',
-                    mode='min',
+                    monitor=self.config['training']['best_model_ckpt']['monitor'],
+                    mode=self.config['training']['best_model_ckpt']['mode'],
                     save_top_k=1,
                     filename='best-{epoch}-{val_loss:.3f}',  # Custom filename for best
                     save_last=True,  # Saves 'last.ckpt' automatically
@@ -292,43 +292,68 @@ class BatteryExperiment:
 
     def analyze_results(
         self, 
-        datasets = ['train', 'val'],
+        datasets=['train', 'val'],
         plot=False,  
         savefig=True, 
         xylims=None,
+        ckpt_path='best'  # Optional: 'best', 'last', or None (use current pipeline)
     ):
-        """Generate predictions and plots for specified subsets 
-        (train and val by default) in subplots"""
+        """Generate predictions and plots for specified subsets."""
         plot = self.config['logging']['plot']
         savefig = self.config['logging']['savefig']
 
-        self.pipeline.eval()
+        ckpt_info = 'no ckpt'
+        # Load the best checkpoint if requested (without overwriting self.pipeline)
+        if ckpt_path == 'best':
+            checkpoint_files = list(self.checkpoint_dir.glob('best-*.ckpt'))
+            if not checkpoint_files:
+                raise FileNotFoundError("No 'best' checkpoint found!")
+            ckpt_path = Path(checkpoint_files[0])
+            ckpt_info = ckpt_path.name
+            pipeline = BatteryPipeline.load_from_checkpoint(
+                ckpt_path,
+                model=self.model,  # Ensure compatibility with the original model
+                denormalize_y=self.train_ds.denormalize['y']
+            )
+        elif ckpt_path == 'last':
+            ckpt_path = self.checkpoint_dir / 'last.ckpt'
+            ckpt_info = ckpt_path.name
+            if not ckpt_path.exists():
+                raise FileNotFoundError("No 'last.ckpt' found!")
+            pipeline = BatteryPipeline.load_from_checkpoint(
+                str(ckpt_path),
+                model=self.model,
+                denormalize_y=self.train_ds.denormalize['y']
+            )
+        else:
+            pipeline = self.pipeline  # Use the current pipeline
+
+        # Ensure model is in eval mode
+        pipeline.eval()  
+        pipeline.freeze()  # Extra safety (optional)
         results = {}
 
         for dataset in datasets:
-            # Get the appropriate dataloader
             dataloader = getattr(self.datamodule, f'{dataset}_dataloader')()
             
-            # Generate predictions
             y_true, y_pred = [], []
-            with torch.no_grad():
+            with torch.no_grad():  # Disable gradients
                 for batch in dataloader:
-                    x = batch['x'].to(self.pipeline.device)
-                    lengths = batch['lengths'].to(self.pipeline.device)
-                    preds = self.pipeline(x, lengths)
+                    x = batch['x'].to(pipeline.device)
+                    lengths = batch['lengths'].to(pipeline.device)
+                    preds = pipeline(x, lengths)  # Forward pass
                     y_true.append(batch['y'].cpu())
                     y_pred.append(preds.cpu())
 
             y_true = torch.cat(y_true)
             y_pred = torch.cat(y_pred)
 
-            # Denormalize using training dataset stats
+            # Denormalize and calculate metrics
             y_true_denorm = self.train_ds.denormalize['y'](y_true)
             y_pred_denorm = self.train_ds.denormalize['y'](y_pred)
 
-            # Calculate metrics
             metrics = {}
-            for name, metric_cls in self.pipeline.metric_classes.items():
+            for name, metric_cls in pipeline.metric_classes.items():
                 metric = metric_cls().to(y_pred_denorm.device)
                 metrics[name] = metric(y_pred_denorm, y_true_denorm).item()
 
@@ -338,7 +363,7 @@ class BatteryExperiment:
                 'metrics': metrics
             }
 
-        # Create figure with subplots
+        # Plotting logic (unchanged)
         fig, axes = plt.subplots(nrows=1, ncols=len(datasets), figsize=(20, 8))
         axes = axes.flatten()
 
@@ -348,7 +373,6 @@ class BatteryExperiment:
             y_pred_denorm = data['y_pred']
             metrics = data['metrics']
 
-            # Scatter plot
             ax.scatter(y_true_denorm, y_pred_denorm, alpha=0.5)
             ax.plot([y_true_denorm.min(), y_true_denorm.max()],
                     [y_true_denorm.min(), y_true_denorm.max()], 'r--')
@@ -356,40 +380,30 @@ class BatteryExperiment:
             ax.set_ylabel('Predictions')
             ax.set_title(f'{dataset.capitalize()} Set: True vs Predicted')
 
-            # Add metrics text
             metric_text = "\n".join([f"{name.upper()}: {val:.4f}" for name, val in metrics.items()])
             ax.text(0.05, 0.95, metric_text, transform=ax.transAxes,
                     verticalalignment='top', horizontalalignment='left',
                     bbox=dict(facecolor='white', alpha=0.5))
 
-            # Apply axis limits if specified
             if xylims is not None:
                 ax.set_xlim(xylims)
                 ax.set_ylim(xylims)
 
-        # Add experiment info
-        exp_name = self.config['experiment_name']
-        version = getattr(self.logger, 'version', 'unknown')
         fig.suptitle(
-            f"Experiment: {exp_name}\n"
-            f"Version: {version}",
-            y=1.02, 
-            fontsize=10,
-            ha='left',
-            x=0.15
+            f"Experiment: {self.config['experiment_name']}\n"
+            f"Version: {getattr(self.logger, 'version', 'unknown')}\n"
+            f"ckpt: {ckpt_info}",
+            y=1.02, fontsize=10, ha='left', x=0.15
         )
 
         plt.tight_layout()
 
-        # Save and show options
         if savefig:
-            fig_filename = f"{exp_name}_version_{version}_{'_'.join(datasets)}.png"
-            plt.savefig(
-                self.exp_dir / fig_filename,
-                bbox_inches='tight',
-                dpi=300
-            )
+            fig_filename = f"{self.config['experiment_name']}_version_{getattr(self.logger, 'version', 'unknown')}_{'_'.join(datasets)}.png"
+            plt.savefig(self.exp_dir / fig_filename, bbox_inches='tight', dpi=300)
         if plot:
             plt.show()
         else:
             plt.close()
+
+        return results  # Optional: Return metrics/predictions for further analysis

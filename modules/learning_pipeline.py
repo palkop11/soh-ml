@@ -255,7 +255,8 @@ class BatteryPipeline(pl.LightningModule):
             scheduler = {
                 'scheduler': torch.optim.lr_scheduler.CosineAnnealingLR(
                     optimizer,
-                    T_max=self.hparams.cosine_t_max
+                    T_max=self.hparams.cosine_t_max,
+                    eta_min=1e-6,
                 ),
                 'interval': 'epoch',
                 'frequency': 1

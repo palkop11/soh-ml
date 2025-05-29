@@ -30,7 +30,7 @@ test_config = {
 
         'lstm_hidden_size': 64,
         'num_layers': 2,
-        
+
         'output_size': 1,
         'dropout_prob': 0.,
         'regressor_hidden_dim': 1024,
@@ -39,11 +39,15 @@ test_config = {
 
     'training': {
         'resume_ckpt': None,
+        'best_model_ckpt': {
+            'monitor': 'val_loss',
+            'mode': 'min',
+        },
         'batch_size': 32,
         'learning_rate': 1e-3,
         'scheduler': 'reduce_on_plateu',
         'loss_type': 'huber1.0',
-        'epochs': 1,
+        'epochs': 2,
         'accelerator': 'auto',
         'devices': 1,
     },
