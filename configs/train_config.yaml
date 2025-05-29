@@ -1,0 +1,45 @@
+data:
+  datadir: ./DATA/dataset_v5_ts_npz/
+  n_diff: 0
+  normalization:
+    x: null
+    y: minmax_zero_one
+  train: train
+  val: val
+experiment_name: train_0
+logging:
+  log_dir: ./LOGS
+  plot: false
+  progress_bar: true
+  savefig: true
+  torchinfo_model_summary: true
+metrics: all
+model:
+  cnn_channels:
+  - 4
+  - 16
+  - 64
+  cnn_kernel_sizes: null
+  cnn_paddings: null
+  cnn_strides: null
+  cnn_use_maxpool: null
+  dropout_prob: 0.25
+  input_size: 2
+  lstm_hidden_size: 64
+  num_layers: 2
+  output_activation: sigmoid
+  output_size: 1
+  regressor_hidden_dim: 1024
+seed: 42
+training:
+  accelerator: auto
+  batch_size: 32
+  best_model_ckpt:
+    mode: min
+    monitor: val_loss
+  devices: 1
+  epochs: 200
+  learning_rate: 0.01
+  loss_type: huber1.0
+  resume_ckpt: null
+  scheduler: cosine
