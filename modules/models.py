@@ -162,7 +162,11 @@ class CNN_LSTM_model(nn.Module):
         output = self.output_activation(output)
         return output.reshape(-1, 1)
     
-def make_model_summary(model, seq_lengths = [379, 16674]):
+def make_model_summary(
+        model, 
+        #seq_lengths = [379, 16674],
+        seq_lengths = [256]
+    ):
     for seq_length in seq_lengths:
         batch_size = 1
         input_size = 2

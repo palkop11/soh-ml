@@ -1,0 +1,70 @@
+data:
+  datadir: ./DATA/dataset_v5_ts_npz/
+  n_diff: 1
+  normalization:
+    x: meanimax
+    y: minmax_zero_one
+  segment_params:
+    drop_last: true
+    overlap: 0
+    segment_length: 378
+  train: train
+  val: val
+experiment_name: train_0_segmented
+logging:
+  log_dir: ./LOGS
+  plot: false
+  progress_bar: true
+  savefig: true
+  torchinfo_model_summary: true
+metrics: all
+model:
+  cnn_channels:
+  - 8
+  - 16
+  - 32
+  - 64
+  cnn_kernel_sizes:
+  - 3
+  - 3
+  - 5
+  - 7
+  cnn_paddings:
+  - 1
+  - 1
+  - 1
+  - 1
+  cnn_strides:
+  - 1
+  - 1
+  - 1
+  - 2
+  cnn_use_maxpool:
+  - false
+  - true
+  - true
+  - true
+  dropout_prob: 0.
+  input_size: 2
+  lstm_hidden_size: 256
+  num_layers: 1
+  output_activation: sigmoid
+  output_size: 1
+  regressor_hidden_dim: 64
+seed: 42
+training:
+  accelerator: auto
+  batch_size: 32
+  best_model_ckpt:
+    mode: min
+    monitor: val_loss
+  devices: 1
+  epochs: 25
+  learning_rate: 0.001
+  loss_type: huber1.0
+  resume_ckpt: null
+  scheduler_parameters:
+    cosine_t_max: 5
+    plateau_factor: 0.5
+    plateau_patience: 5
+    scheduler_type: cosine

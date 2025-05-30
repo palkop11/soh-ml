@@ -121,6 +121,171 @@ class SingleBatteryDataset(Dataset):
             'y': y,
         }
     
+# --------------------------------
+# Segmented Single Battery Dataset
+# --------------------------------
+
+class SegmentedSingleBatteryDataset(SingleBatteryDataset):
+    """Нарезает каждый цикл батареи на сегменты фиксированной длины
+    
+    ```
+    Attributes
+    ----------
+    segment_length : int
+        длина каждого сегмента в точках
+        
+    overlap : int, default 0
+        перекрытие между соседними сегментами
+        
+    drop_last : bool, default True
+        отбрасывать последний неполный сегмент
+    """
+    def __init__(
+        self,
+        battery_path: str,
+        segment_length: int,
+        overlap: int = 0,
+        drop_last: bool = True,
+        *args,
+        **kwargs
+    ):
+        super().__init__(battery_path, *args, **kwargs)
+        self.segment_length = segment_length
+        self.overlap = overlap
+        self.drop_last = drop_last
+        
+        # Предварительно вычисляем количество сегментов для каждого цикла
+        self.segments_per_cycle = []
+        for i in range(len(self.data)):
+            row = self.data.iloc[i]
+            x = np.load(row['path'])[self.x_npz_key][::self.x_step]
+            
+            if self.n_diff is not None:
+                x = np.diff(x, axis=0, n=self.n_diff)
+                
+            n_points = len(x)
+            step = self.segment_length - self.overlap
+            n_segments = max(0, (n_points - self.overlap) // step)
+            
+            if not self.drop_last and (n_points - self.segment_length) % step != 0:
+                n_segments += 1
+                
+            self.segments_per_cycle.append(n_segments)
+        
+        # Кумулятивные суммы для быстрого поиска
+        self.cumulative_segments = [0]
+        for count in self.segments_per_cycle:
+            self.cumulative_segments.append(self.cumulative_segments[-1] + count)
+
+    def __len__(self):
+        return self.cumulative_segments[-1]
+
+    def __getitem__(self, idx):
+        # Определяем индекс цикла
+        cycle_idx = bisect.bisect_right(self.cumulative_segments, idx) - 1
+        # Локальный индекс сегмента в цикле
+        segment_idx = idx - self.cumulative_segments[cycle_idx]
+        
+        # Загружаем полный цикл
+        row = self.data.iloc[cycle_idx]
+        x = np.load(row['path'])[self.x_npz_key][::self.x_step]
+        
+        if self.n_diff is not None:
+            x = np.diff(x, axis=0, n=self.n_diff)
+        
+        # Вычисляем границы сегмента
+        step = self.segment_length - self.overlap
+        start = segment_idx * step
+        end = start + self.segment_length
+        
+        # Обработка последнего сегмента
+        if end > len(x) and not self.drop_last:
+            end = len(x)
+            start = end - self.segment_length
+        
+        x_segment = x[start:end]
+        
+        # Преобразуем в тензор и нормализуем
+        x_tensor = torch.tensor(x_segment)
+        if self.normalize['x'] is not None:
+            x_tensor = self.normalize['x'](x_tensor)
+        
+        y = torch.tensor(row['norm_cap'], dtype=torch.float32)
+        if self.normalize['y'] is not None:
+            y = self.normalize['y'](y)
+            
+        return {'x': x_tensor, 'y': y}
+    
+# ---------------------------------------
+# Cached Segmented Single Battery Dataset
+# ---------------------------------------
+
+class CachedSegmentedBatteryDataset(SegmentedSingleBatteryDataset):
+    """Нарезает циклы на сегменты с кэшированием циклов в памяти"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cycle_cache = {}  # Кэш для загруженных циклов: {cycle_idx: tensor}
+        
+    def __getitem__(self, idx):
+        # Определяем индекс цикла
+        cycle_idx = bisect.bisect_right(self.cumulative_segments, idx) - 1
+        
+        # Кэширование циклов в памяти
+        if cycle_idx not in self.cycle_cache:
+            row = self.data.iloc[cycle_idx]
+            x = np.load(row['path'])[self.x_npz_key][::self.x_step]
+            
+            if self.n_diff is not None:
+                x = np.diff(x, axis=0, n=self.n_diff)
+                
+            self.cycle_cache[cycle_idx] = torch.tensor(x, dtype=torch.float32)
+        
+        x_cycle = self.cycle_cache[cycle_idx]
+        
+        # Локальный индекс сегмента в цикле
+        segment_idx = idx - self.cumulative_segments[cycle_idx]
+        
+        # Вычисляем границы сегмента
+        step = self.segment_length - self.overlap
+        start = segment_idx * step
+        end = start + self.segment_length
+        
+        # Обработка последнего сегмента
+        if end > len(x_cycle):
+            if self.drop_last:
+                # Корректируем границы для последнего полного сегмента
+                start = len(x_cycle) - self.segment_length
+                end = len(x_cycle)
+            else:
+                # Дополняем неполный сегмент нулями
+                padding = torch.zeros(
+                    self.segment_length - (end - start),
+                    x_cycle.shape[1]
+                )
+                x_segment = torch.cat([x_cycle[start:], padding])
+                return self._finalize_item(x_segment, cycle_idx)
+        
+        # Вырезаем сегмент
+        x_segment = x_cycle[start:end]
+        
+        return self._finalize_item(x_segment, cycle_idx)
+    
+    def _finalize_item(self, x_segment, cycle_idx):
+        """Применяет нормализацию и возвращает финальный элемент"""
+        # Применяем нормализацию признаков
+        if self.normalize['x'] is not None:
+            x_segment = self.normalize['x'](x_segment)
+        
+        # Получаем целевую переменную
+        row = self.data.iloc[cycle_idx]
+        y = torch.tensor(row['norm_cap'], dtype=torch.float32)
+        
+        # Применяем нормализацию целевой переменной
+        if self.normalize['y'] is not None:
+            y = self.normalize['y'](y)
+        
+        return {'x': x_segment, 'y': y}
+    
 # -----------------
 # Composite Dataset
 # -----------------
@@ -363,6 +528,9 @@ class DataSetCreation:
             n_diff : int | None = None,
             Single : SingleBatteryDataset = SingleBatteryDataset,
             Composite : CompositeBatteryDataset = CompositeBatteryDataset,
+            segment_params: dict | None = None,  # Параметры сегментации
+            #SingleSegmented = CachedSegmentedBatteryDataset,
+            SingleSegmented = SegmentedSingleBatteryDataset,
         ):
         self.info = info
         self.Single = Single
@@ -376,6 +544,9 @@ class DataSetCreation:
         self.StatsCalculator = StatsCalculator
         self.x_step = x_step
         self.n_diff = n_diff
+
+        self.segment_params = segment_params
+        self.SingleSegmented = SingleSegmented
 
         self.denormalize = {'x': None, 'y': None}
         self.dataset = None
@@ -403,17 +574,28 @@ supported for \'normalization_types\' argument')
         batteries = []
 
         for i, row in self.info.iterrows():
-            batt = self.Single(
+            # Если заданы параметры сегментации
+            if self.segment_params:
+                print(f"... creating SingleSegmented using {row['battery_path']}")
+                batt = self.SingleSegmented(
                     row['battery_path'],
-                    x_step = self.x_step,
-                    n_diff = self.n_diff,
+                    **self.segment_params,  # segment_length, overlap и т.д.
+                    x_step=self.x_step,
+                    #x_npz_key=self.x_npz_key,
+                    normalize={},  # Нормализация установится позже
+                    n_diff=self.n_diff
+                )
+            else:
+                batt = self.Single(
+                    row['battery_path'],
+                    x_step=self.x_step,
+                    #x_npz_key=self.x_npz_key,
+                    normalize={},
+                    n_diff=self.n_diff
                 )
             batteries.append(batt)
-
-        dataset = self.Composite(
-                batteries,
-                normalize = self.normalize,
-            )
+        
+        dataset = self.Composite(batteries, normalize=self.normalize)
         return dataset
 
     def _set_stats_norm_denorm(self):

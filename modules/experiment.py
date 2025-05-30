@@ -10,10 +10,11 @@ import torch
 import yaml
 
 from pytorch_lightning.loggers import TensorBoardLogger
+from torch.utils.data import DataLoader
 
 from .data_splitting import get_subset_info
 from .datasets import DataSetCreation
-from .learning_pipeline import BatteryDataModule, BatteryPipeline, collate_fn
+from .learning_pipeline import BatteryDataModule, BatteryPipeline, collate_fn, fast_collate_fn
 from .models import CNN_LSTM_model, make_model_summary
 
 class BatteryExperiment:
@@ -68,7 +69,8 @@ class BatteryExperiment:
             train_info,
             fit_normalization=True,
             normalization_types=self.config['data']['normalization'],
-            n_diff=self.config['data']['n_diff']
+            n_diff=self.config['data']['n_diff'],
+            segment_params=self.config['data']['segment_params'],
         )
 
         # Validation dataset
@@ -79,7 +81,8 @@ class BatteryExperiment:
         self.val_ds = DataSetCreation(
             val_info,
             normalize=self.train_ds.normalize,
-            n_diff=self.config['data']['n_diff']
+            n_diff=self.config['data']['n_diff'],
+            segment_params=self.config['data']['segment_params'],
         )
 
         # Test dataset (optional)
@@ -91,7 +94,8 @@ class BatteryExperiment:
             self.test_ds = DataSetCreation(
                 test_info,
                 normalize=self.train_ds.normalize,
-                n_diff=self.config['data']['n_diff']
+                n_diff=self.config['data']['n_diff'],
+                segment_params=self.config['data']['segment_params'],
             )
 
     def create_model(self):
@@ -116,12 +120,19 @@ class BatteryExperiment:
         )
 
     def create_datamodule(self):
+        segment_params = self.config['data'].get('segment_params')
+        if segment_params and isinstance(segment_params, dict):
+            if segment_params.get('drop_last', True):
+                coll_fn = lambda batch: fast_collate_fn(batch, fill_length=segment_params['segment_length'])
+        else:
+            coll_fn = collate_fn
+
         return BatteryDataModule(
             train_dataset=self.train_ds.dataset,
             val_dataset=self.val_ds.dataset,
             test_dataset=self.test_ds.dataset if hasattr(self, 'test_ds') else None,
             batch_size=self.config['training']['batch_size'],
-            collate_fn=collate_fn
+            collate_fn=coll_fn
         )
 
     def create_pipeline(self):
@@ -130,8 +141,8 @@ class BatteryExperiment:
             denormalize_y=self.train_ds.denormalize['y'],
             loss_type=self.config['training']['loss_type'], # 'mse', 'huber', 'bce'
             learning_rate=self.config['training']['learning_rate'],
-            scheduler_type=self.config['training']['scheduler'],
             metrics = self.config['metrics'], # list like ['mse', 'mae', 'mape', 'r2', 'rcc']
+            **self.config['training']['scheduler_parameters'],
         )
 
     def create_trainer(self):
@@ -254,7 +265,13 @@ class BatteryExperiment:
 
         if self.config['logging'].get('torchinfo_model_summary'):
             try:
-                make_model_summary(self.model)
+                seq_lengths = self.config['data']['segment_params']['segment_length']
+                if seq_lengths is None:
+                    seq_lengths = [379, 16674]
+                else:
+                    seq_lengths = [seq_lengths]
+
+                make_model_summary(self.model, seq_lengths=seq_lengths)
             except Exception as e:
                 print(f"\nWarning: torchinfo summary of model resulted in exception:\n{e}\n")
 
@@ -334,7 +351,15 @@ class BatteryExperiment:
         results = {}
 
         for dataset in datasets:
-            dataloader = getattr(self.datamodule, f'{dataset}_dataloader')()
+            # Replace dataloader creation with single-worker version
+            dataset_obj = getattr(self.datamodule, f'{dataset}_dataset')
+            dataloader = DataLoader(
+                dataset_obj,
+                batch_size=self.datamodule.batch_size,
+                shuffle=False,
+                collate_fn=self.datamodule.collate_fn,
+                num_workers=0  # Critical fix - disable multiprocessing
+            )
             
             y_true, y_pred = [], []
             with torch.no_grad():  # Disable gradients

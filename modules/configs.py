@@ -1,6 +1,6 @@
 # TEST CONFIGURATION for single experiment
 test_config = {
-    'experiment_name': 'testing_on_small', # also used for TensorBoard logging
+    'experiment_name': 'testing_on_small_segmented', # also used for TensorBoard logging
     'seed': 42,
 
     'data': {
@@ -17,22 +17,27 @@ test_config = {
         #'test': None,
         'normalization': {'x': None, 'y': 'minmax_zero_one'},
         'n_diff': 0,
+        'segment_params': {
+            'segment_length': 379,
+            'overlap': 0, 
+            'drop_last':True,
+        }
     },
 
     'model': {
         'input_size': 2,
 
-        'cnn_channels': [4, 8, 16],  # Last element can be final channel dim
-        'cnn_kernel_sizes': None, # None for default
-        'cnn_strides': None, # None for default
-        'cnn_paddings': None, # None for default
-        'cnn_use_maxpool': None,  # List of booleans for maxpool per block
+        'cnn_channels': [4, 16, 64],  # Last element can be final channel dim
+        'cnn_kernel_sizes': [3, 3, 3], # None for default
+        'cnn_strides': [1, 2, 2], # None for default
+        'cnn_paddings': [1, 1, 1], # None for default
+        'cnn_use_maxpool': [False, True, True],  # List of booleans for maxpool per block
 
         'lstm_hidden_size': 64,
         'num_layers': 2,
 
         'output_size': 1,
-        'dropout_prob': 0.,
+        'dropout_prob': 0.4,
         'regressor_hidden_dim': 1024,
         'output_activation': 'sigmoid',
     },
@@ -45,9 +50,14 @@ test_config = {
         },
         'batch_size': 32,
         'learning_rate': 1e-3,
-        'scheduler': 'reduce_on_plateu',
+        'scheduler_parameters': {
+            'scheduler_type': None,
+            'plateau_factor': 0.5,
+            'plateau_patience': 5,
+            'cosine_t_max': 10,
+        },
         'loss_type': 'huber1.0',
-        'epochs': 2,
+        'epochs': 50,
         'accelerator': 'auto',
         'devices': 1,
     },

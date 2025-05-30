@@ -26,6 +26,22 @@ def collate_fn(batch):
         'y': y.reshape(-1, 1),
     }
 
+def fast_collate_fn(batch, fill_length = 256):
+    """Упрощенная collate function для одинаковых сегментов"""
+    # Все сегменты имеют одинаковую длину благодаря drop_last=True 
+    # в SegmentedSingleBatteryDataset или CachedSegmentedBatteryDataset
+    x = torch.stack([item['x'] for item in batch])
+    y = torch.stack([item['y'] for item in batch])
+    lengths = torch.full((len(x),), dtype=torch.int64, fill_value=fill_length)
+    
+    #print(x.shape)
+
+    return {
+        'x': x,             # [batch_size, seq_len, 2]
+        'y': y.unsqueeze(1), # [batch_size, 1]
+        'lengths': lengths   # [batch_size]
+    }
+
 # -----------------
 # BatteryDataModule
 # -----------------
@@ -93,9 +109,9 @@ class BatteryPipeline(pl.LightningModule):
         learning_rate=1e-3,
         metrics=None,
         # Scheduler parameters
-        scheduler_type: str | None = None,  # 'reduce_on_plateu', 'cosine', or None
-        plateau_factor: float = 0.5,        # For 'reduce_on_plateu'
-        plateau_patience: int = 5,          # For 'reduce_on_plateu'
+        scheduler_type: str | None = None,  # 'reduce_on_plateau', 'cosine', or None
+        plateau_factor: float = 0.5,        # For 'reduce_on_plateau'
+        plateau_patience: int = 5,          # For 'reduce_on_plateau'
         cosine_t_max: int = 50,             # For 'cosine' (epochs)
     ):
         super().__init__()
@@ -237,7 +253,7 @@ class BatteryPipeline(pl.LightningModule):
             lr=self.hparams.learning_rate
         )
 
-        if self.hparams.scheduler_type == 'reduce_on_plateu':
+        if self.hparams.scheduler_type == 'reduce_on_plateau':
             scheduler = {
                 'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(
                     optimizer,
