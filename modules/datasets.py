@@ -575,7 +575,10 @@ supported for \'normalization_types\' argument')
 
         for i, row in self.info.iterrows():
             # Если заданы параметры сегментации
-            if self.segment_params:
+            if self.segment_params and \
+                isinstance(self.segment_params, dict) and \
+                    self.segment_params.get('segment_length') is not None:
+                
                 print(f"... creating SingleSegmented using {row['battery_path']}")
                 batt = self.SingleSegmented(
                     row['battery_path'],

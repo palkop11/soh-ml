@@ -121,11 +121,12 @@ class BatteryExperiment:
 
     def create_datamodule(self):
         segment_params = self.config['data'].get('segment_params')
+        coll_fn = collate_fn
         if segment_params and isinstance(segment_params, dict):
-            if segment_params.get('drop_last', True):
+            if segment_params.get('segment_length') is not None and \
+                  segment_params.get('drop_last', True) == True:
+                
                 coll_fn = lambda batch: fast_collate_fn(batch, fill_length=segment_params['segment_length'])
-        else:
-            coll_fn = collate_fn
 
         return BatteryDataModule(
             train_dataset=self.train_ds.dataset,
