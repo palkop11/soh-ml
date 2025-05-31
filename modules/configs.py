@@ -45,10 +45,20 @@ test_config = {
 
     'training': {
         'resume_ckpt': None,
-        'best_model_ckpt': {
-            'monitor': 'val_loss',
-            'mode': 'min',
-        },
+        'best_model_ckpt': [
+            {
+                'monitor': 'val_loss',
+                'mode': 'min',
+            },
+            {
+                'monitor': 'val_pcc',
+                'mode': 'max',
+            },
+            {
+                'monitor': 'val_r2',
+                'mode': 'max',
+            },
+        ],
         'batch_size': 32,
         'learning_rate': 1e-3,
         'scheduler_parameters': {
@@ -58,7 +68,7 @@ test_config = {
             'cosine_t_max': 25,
         },
         'loss_type': 'huber1.0',
-        'epochs': 200,
+        'epochs': 5,
         'accelerator': 'auto',
         'devices': 1,
     },

@@ -161,26 +161,52 @@ class BatteryExperiment:
 
     def create_trainer(self):
         precision = "64" if self.dtype == torch.float64 else "32"
+        
+        # Prepare callbacks list
+        callbacks = []
+        
+        # Add last checkpoint callback (optional but recommended)
+        callbacks.append(pl.callbacks.ModelCheckpoint(
+            dirpath=self.checkpoint_dir,
+            save_last=True,
+            save_top_k=0,  # Only saves last checkpoint
+            filename='last-{epoch}'
+        ))
+        
+        # Add best checkpoints for metrics
+
+        ckpt_cfg = self.config['training']['best_model_ckpt']
+
+        # if best_model_ckpt is specified only once and is not list,
+        # turn it into list with length = 1
+        if not isinstance(ckpt_cfg, list):
+            ckpt_cfg = [ckpt_cfg]
+
+        for single_ckpt_cfg in ckpt_cfg:
+            metric_name = single_ckpt_cfg['monitor']
+            ckpt_filename = "best-{epoch}-{%s:.3f}"%(metric_name)
+
+            callbacks.append(pl.callbacks.ModelCheckpoint(
+                dirpath=self.checkpoint_dir,
+                monitor=single_ckpt_cfg['monitor'],
+                mode=single_ckpt_cfg['mode'],
+                save_top_k=1,
+                filename=ckpt_filename,
+                save_last=False  # Already handled separately
+            ))
+        
         return pl.Trainer(
             precision=precision,
             max_epochs=self.config['training']['epochs'],
             logger=self.logger,
             accelerator=self.config['training']['accelerator'],
             devices=self.config['training']['devices'],
-            callbacks=[
-                pl.callbacks.ModelCheckpoint(
-                    dirpath=self.checkpoint_dir,
-                    monitor=self.config['training']['best_model_ckpt']['monitor'],
-                    mode=self.config['training']['best_model_ckpt']['mode'],
-                    save_top_k=1,
-                    filename='best-{epoch}-{val_loss:.3f}',  # Custom filename for best
-                    save_last=True,  # Saves 'last.ckpt' automatically
-                )
-            ],
+            callbacks=callbacks,  # Use callbacks list
             enable_progress_bar=self.config['logging']['progress_bar'],
             enable_model_summary=False,
             deterministic=True
         )
+    
     def _get_current_version_number(self):
         current_version = self.logger.version
         if isinstance(current_version, str):
