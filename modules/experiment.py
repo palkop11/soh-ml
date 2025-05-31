@@ -355,122 +355,141 @@ class BatteryExperiment:
         plot=False,  
         savefig=True, 
         xylims=None,
-        ckpt_path='best'  # Optional: 'best', 'last', or None (use current pipeline)
+        ckpt_path='all'  # 'all', 'best', 'last', or specific checkpoint
     ):
-        """Generate predictions and plots for specified subsets."""
+        """Generate predictions and plots for all best checkpoints and last checkpoint"""
         plot = self.config['logging']['plot']
         savefig = self.config['logging']['savefig']
 
-        ckpt_info = 'no ckpt'
-        # Load the best checkpoint if requested (without overwriting self.pipeline)
-        if ckpt_path == 'best':
-            checkpoint_files = list(self.checkpoint_dir.glob('best-*.ckpt'))
-            if not checkpoint_files:
-                raise FileNotFoundError("No 'best' checkpoint found!")
-            ckpt_path = Path(checkpoint_files[0])
-            ckpt_info = ckpt_path.name
-            pipeline = BatteryPipeline.load_from_checkpoint(
-                ckpt_path,
-                model=self.model,  # Ensure compatibility with the original model
-                denormalize_y=self.train_ds.denormalize['y']
-            )
-        elif ckpt_path == 'last':
-            ckpt_path = self.checkpoint_dir / 'last.ckpt'
-            ckpt_info = ckpt_path.name
-            if not ckpt_path.exists():
-                raise FileNotFoundError("No 'last.ckpt' found!")
-            pipeline = BatteryPipeline.load_from_checkpoint(
-                str(ckpt_path),
-                model=self.model,
-                denormalize_y=self.train_ds.denormalize['y']
-            )
-        else:
-            pipeline = self.pipeline  # Use the current pipeline
+        # Collect all checkpoints to analyze
+        checkpoints = {}
+        
+        # Always include last checkpoint
+        last_ckpt = self.checkpoint_dir / 'last.ckpt'
+        if last_ckpt.exists():
+            checkpoints['last'] = last_ckpt
+        
+        # Collect best checkpoints
+        if ckpt_path in ['all', 'best']:
+            for ckpt_file in self.checkpoint_dir.glob('best-*.ckpt'):
+                # Extract metric name from filename (best-epoch=X-val_metric=Y.ckpt)
+                match = re.search(r'best-epoch=\d+-(.*?)=[\d.]+\.ckpt$', ckpt_file.name)
+                if match:
+                    metric_name = match.group(1)
+                    checkpoints[f'best_{metric_name}'] = ckpt_file
+        
+        # Handle specific checkpoint request
+        if isinstance(ckpt_path, (str, Path)) and ckpt_path not in ['all', 'best', 'last']:
+            specific_ckpt = Path(ckpt_path)
+            if specific_ckpt.exists():
+                checkpoints['specific'] = specific_ckpt
+        
+        if not checkpoints:
+            print("No checkpoints found for analysis")
+            return None
 
-        # Ensure model is in eval mode
-        pipeline.eval()  
-        pipeline.freeze()  # Extra safety (optional)
-        results = {}
-
-        for dataset in datasets:
-            # Replace dataloader creation with single-worker version
-            dataset_obj = getattr(self.datamodule, f'{dataset}_dataset')
-            dataloader = DataLoader(
-                dataset_obj,
-                batch_size=self.datamodule.batch_size,
-                shuffle=False,
-                collate_fn=self.datamodule.collate_fn,
-                num_workers=0  # Critical fix - disable multiprocessing
-            )
-            
-            y_true, y_pred = [], []
-            with torch.no_grad():  # Disable gradients
-                for batch in dataloader:
-                    x = batch['x'].to(self.dtype).to(pipeline.device)
-                    lengths = batch['lengths'].to(pipeline.device)
-                    preds = pipeline(x, lengths)  # Forward pass
-                    y_true.append(batch['y'].cpu())
-                    y_pred.append(preds.cpu())
-
-            y_true = torch.cat(y_true)
-            y_pred = torch.cat(y_pred)
-
-            # Denormalize and calculate metrics
-            y_true_denorm = self.train_ds.denormalize['y'](y_true)
-            y_pred_denorm = self.train_ds.denormalize['y'](y_pred)
-
-            metrics = {}
-            for name, metric_cls in pipeline.metric_classes.items():
-                metric = metric_cls().to(y_pred_denorm.device)
-                metrics[name] = metric(y_pred_denorm, y_true_denorm).item()
-
-            results[dataset] = {
-                'y_true': y_true_denorm,
-                'y_pred': y_pred_denorm,
-                'metrics': metrics
-            }
-
-        # Plotting logic (unchanged)
-        fig, axes = plt.subplots(nrows=1, ncols=len(datasets), figsize=(20, 8))
-        axes = axes.flatten()
-
-        for ax, dataset in zip(axes, datasets):
-            data = results[dataset]
-            y_true_denorm = data['y_true']
-            y_pred_denorm = data['y_pred']
-            metrics = data['metrics']
-
-            ax.scatter(y_true_denorm, y_pred_denorm, alpha=0.5)
-            ax.plot([y_true_denorm.min(), y_true_denorm.max()],
-                    [y_true_denorm.min(), y_true_denorm.max()], 'r--')
-            ax.set_xlabel('True Values')
-            ax.set_ylabel('Predictions')
-            ax.set_title(f'{dataset.capitalize()} Set: True vs Predicted')
-
-            metric_text = "\n".join([f"{name.upper()}: {val:.4f}" for name, val in metrics.items()])
-            ax.text(0.05, 0.95, metric_text, transform=ax.transAxes,
-                    verticalalignment='top', horizontalalignment='left',
-                    bbox=dict(facecolor='white', alpha=0.5))
-
-            if xylims is not None:
-                ax.set_xlim(xylims)
-                ax.set_ylim(xylims)
-
-        fig.suptitle(
-            f"Experiment: {self.config['experiment_name']}\n"
-            f"Version: {getattr(self.logger, 'version', 'unknown')}\n"
-            f"ckpt: {ckpt_info}",
-            y=1.02, fontsize=10, ha='left', x=0.15
-        )
-
-        plt.tight_layout()
-
-        if savefig:
-            fig_filename = f"{self.config['experiment_name']}_version_{getattr(self.logger, 'version', 'unknown')}_{'_'.join(datasets)}.png"
-            plt.savefig(self.exp_dir / fig_filename, bbox_inches='tight', dpi=300)
-        if plot:
-            plt.show()
-        else:
-            plt.close()
-
-        return results  # Optional: Return metrics/predictions for further analysis
+        all_results = {}
+        
+        for ckpt_name, ckpt_path in checkpoints.items():
+            try:
+                # Load pipeline from checkpoint
+                pipeline = BatteryPipeline.load_from_checkpoint(
+                    str(ckpt_path),
+                    model=self.model,
+                    denormalize_y=self.train_ds.denormalize['y']
+                )
+                pipeline.eval()
+                pipeline.freeze()
+                
+                # Analyze results for this checkpoint
+                results = {}
+                for dataset in datasets:
+                    # Create dataloader
+                    dataset_obj = getattr(self.datamodule, f'{dataset}_dataset')
+                    dataloader = DataLoader(
+                        dataset_obj,
+                        batch_size=self.datamodule.batch_size,
+                        shuffle=False,
+                        collate_fn=self.datamodule.collate_fn,
+                        num_workers=0
+                    )
+                    
+                    # Get predictions
+                    y_true, y_pred = [], []
+                    with torch.no_grad():
+                        for batch in dataloader:
+                            x = batch['x'].to(self.dtype).to(pipeline.device)
+                            lengths = batch['lengths'].to(pipeline.device)
+                            preds = pipeline(x, lengths)
+                            y_true.append(batch['y'].cpu())
+                            y_pred.append(preds.cpu())
+                    
+                    y_true = torch.cat(y_true)
+                    y_pred = torch.cat(y_pred)
+                    
+                    # Denormalize
+                    y_true_denorm = self.train_ds.denormalize['y'](y_true)
+                    y_pred_denorm = self.train_ds.denormalize['y'](y_pred)
+                    
+                    # Calculate metrics
+                    metrics = {}
+                    for name, metric_cls in pipeline.metric_classes.items():
+                        metric = metric_cls().to(y_pred_denorm.device)
+                        metrics[name] = metric(y_pred_denorm, y_true_denorm).item()
+                    
+                    results[dataset] = {
+                        'y_true': y_true_denorm,
+                        'y_pred': y_pred_denorm,
+                        'metrics': metrics
+                    }
+                
+                # Save results
+                all_results[ckpt_name] = results
+                
+                # Create plot
+                fig, axes = plt.subplots(nrows=1, ncols=len(datasets), figsize=(20, 8))
+                axes = axes.flatten() if len(datasets) > 1 else [axes]
+                
+                for ax, dataset in zip(axes, datasets):
+                    data = results[dataset]
+                    y_true_denorm = data['y_true']
+                    y_pred_denorm = data['y_pred']
+                    metrics = data['metrics']
+                    
+                    ax.scatter(y_true_denorm, y_pred_denorm, alpha=0.5)
+                    ax.plot([y_true_denorm.min(), y_true_denorm.max()],
+                            [y_true_denorm.min(), y_true_denorm.max()], 'r--')
+                    ax.set_xlabel('True Values')
+                    ax.set_ylabel('Predictions')
+                    ax.set_title(f'{dataset.capitalize()} Set: True vs Predicted')
+                    
+                    metric_text = "\n".join([f"{name.upper()}: {val:.4f}" for name, val in metrics.items()])
+                    ax.text(0.05, 0.95, metric_text, transform=ax.transAxes,
+                            verticalalignment='top', horizontalalignment='left',
+                            bbox=dict(facecolor='white', alpha=0.5))
+                    
+                    if xylims is not None:
+                        ax.set_xlim(xylims)
+                        ax.set_ylim(xylims)
+                
+                fig.suptitle(
+                    f"Experiment: {self.config['experiment_name']}\n"
+                    f"Version: {getattr(self.logger, 'version', 'unknown')}\n"
+                    f"Checkpoint: {ckpt_name} ({ckpt_path.name})",
+                    y=1.02, fontsize=10, ha='left', x=0.15
+                )
+                
+                plt.tight_layout()
+                
+                if savefig:
+                    fig_filename = f"{self.config['experiment_name']}_version_{getattr(self.logger, 'version', 'unknown')}_{ckpt_name}_{'_'.join(datasets)}.png"
+                    plt.savefig(self.exp_dir / fig_filename, bbox_inches='tight', dpi=300)
+                if plot:
+                    plt.show()
+                else:
+                    plt.close()
+                    
+            except Exception as e:
+                print(f"Error analyzing checkpoint {ckpt_path}: {e}")
+        
+        return all_results
