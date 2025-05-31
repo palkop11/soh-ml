@@ -21,6 +21,7 @@ class BatteryExperiment:
     def __init__(self, config):
         self.config = config
         self.set_seed()
+        self.set_precision()
         self.logger = self.create_logger()
         self.prepare_paths()
         self.model = None
@@ -36,6 +37,15 @@ class BatteryExperiment:
         random.seed(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+    def set_precision(self):
+        precision = self.config.get('precision', 'float32')
+        self.dtype = torch.float32 if precision == 'float32' else \
+            (torch.float64 if precision == 'float64' else None)
+        if self.dtype is None:
+            raise ValueError("Specify precision properly, supported dtypes are \'float32\', \'float64\'")
+        torch.set_default_dtype(self.dtype)
+        print(f"Using precision: {precision}")
 
     def prepare_paths(self):
         # Get the version from the logger (auto-generated if not specified)
@@ -71,6 +81,7 @@ class BatteryExperiment:
             normalization_types=self.config['data']['normalization'],
             n_diff=self.config['data']['n_diff'],
             segment_params=self.config['data']['segment_params'],
+            dtype = self.dtype,
         )
 
         # Validation dataset
@@ -83,6 +94,7 @@ class BatteryExperiment:
             normalize=self.train_ds.normalize,
             n_diff=self.config['data']['n_diff'],
             segment_params=self.config['data']['segment_params'],
+            dtype = self.dtype,
         )
 
         # Test dataset (optional)
@@ -96,6 +108,7 @@ class BatteryExperiment:
                 normalize=self.train_ds.normalize,
                 n_diff=self.config['data']['n_diff'],
                 segment_params=self.config['data']['segment_params'],
+                dtype = self.dtype,
             )
 
     def create_model(self):
@@ -147,7 +160,9 @@ class BatteryExperiment:
         )
 
     def create_trainer(self):
+        precision = "64" if self.dtype == torch.float64 else "32"
         return pl.Trainer(
+            precision=precision,
             max_epochs=self.config['training']['epochs'],
             logger=self.logger,
             accelerator=self.config['training']['accelerator'],
@@ -272,7 +287,7 @@ class BatteryExperiment:
                 else:
                     seq_lengths = [seq_lengths]
 
-                make_model_summary(self.model, seq_lengths=seq_lengths)
+                make_model_summary(self.model, seq_lengths=seq_lengths, dtype=self.dtype)
             except Exception as e:
                 print(f"\nWarning: torchinfo summary of model resulted in exception:\n{e}\n")
 
@@ -365,7 +380,7 @@ class BatteryExperiment:
             y_true, y_pred = [], []
             with torch.no_grad():  # Disable gradients
                 for batch in dataloader:
-                    x = batch['x'].to(pipeline.device)
+                    x = batch['x'].to(self.dtype).to(pipeline.device)
                     lengths = batch['lengths'].to(pipeline.device)
                     preds = pipeline(x, lengths)  # Forward pass
                     y_true.append(batch['y'].cpu())

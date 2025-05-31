@@ -113,6 +113,7 @@ class BatteryPipeline(pl.LightningModule):
         plateau_factor: float = 0.5,        # For 'reduce_on_plateau'
         plateau_patience: int = 5,          # For 'reduce_on_plateau'
         cosine_t_max: int = 50,             # For 'cosine' (epochs)
+        dtype = torch.float32,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=['model', 'denormalize_y'])
@@ -160,7 +161,7 @@ class BatteryPipeline(pl.LightningModule):
             'mae': MeanAbsoluteError,
             'mape': MeanAbsolutePercentageError,
             'r2': R2Score,
-            'pcc': PearsonCorrCoef,
+            'pcc': PearsonCorrCoef
         }
 
         self.metric_classes = {}
@@ -176,15 +177,15 @@ class BatteryPipeline(pl.LightningModule):
             self.metric_classes = metrics_set
 
         self.train_metrics = MetricCollection(
-            {name: cls() for name, cls in self.metric_classes.items()},
+            {name: cls().to(dtype=self.dtype) for name, cls in self.metric_classes.items()},
             prefix='train_'
         )
         self.val_metrics = MetricCollection(
-            {name: cls() for name, cls in self.metric_classes.items()},
+            {name: cls().to(dtype=self.dtype) for name, cls in self.metric_classes.items()},
             prefix='val_'
         )
         self.test_metrics = MetricCollection(
-            {name: cls() for name, cls in self.metric_classes.items()},
+            {name: cls().to(dtype=self.dtype) for name, cls in self.metric_classes.items()},
             prefix='test_'
         )
 
@@ -253,10 +254,14 @@ class BatteryPipeline(pl.LightningModule):
             lr=self.hparams.learning_rate
         )
 
+        min_lr = 1e-12 if self.dtype == torch.float64 else 1e-6
+        eta_min = 1e-12 if self.dtype == torch.float64 else 1e-6
+
         if self.hparams.scheduler_type == 'reduce_on_plateau':
             scheduler = {
                 'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(
                     optimizer,
+                    min_lr=min_lr,
                     mode='min',
                     factor=self.hparams.plateau_factor,
                     patience=self.hparams.plateau_patience
@@ -272,7 +277,7 @@ class BatteryPipeline(pl.LightningModule):
                 'scheduler': torch.optim.lr_scheduler.CosineAnnealingLR(
                     optimizer,
                     T_max=self.hparams.cosine_t_max,
-                    eta_min=1e-6,
+                    eta_min=eta_min,
                 ),
                 'interval': 'epoch',
                 'frequency': 1

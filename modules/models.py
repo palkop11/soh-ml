@@ -165,12 +165,13 @@ class CNN_LSTM_model(nn.Module):
 def make_model_summary(
         model, 
         #seq_lengths = [379, 16674],
-        seq_lengths = [256]
+        seq_lengths = [256],
+        dtype = torch.float32,
     ):
     for seq_length in seq_lengths:
         batch_size = 1
         input_size = 2
-        dummy_x = torch.randn(batch_size, seq_length, input_size)
+        dummy_x = torch.randn(batch_size, seq_length, input_size, dtype=dtype)
         dummy_lengths = torch.tensor([seq_length])  # Example: all sequences are full-length
 
         print('\ntensor shape for torchinfo model summary:', list(dummy_x.shape))

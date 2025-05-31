@@ -57,6 +57,7 @@ class SingleBatteryDataset(Dataset):
                 x_npz_key : str = 'current_voltage_unitless',
                 normalize : dict[callable] = {},
                 n_diff : int | None = None,
+                dtype = torch.float32,
             ):
         super().__init__()
         self.battery_path = battery_path
@@ -67,6 +68,7 @@ class SingleBatteryDataset(Dataset):
         self.normalize.update(normalize)
 
         self.n_diff = n_diff
+        self.dtype = dtype
 
         self.data = self._prepare_data()
 
@@ -105,13 +107,13 @@ class SingleBatteryDataset(Dataset):
             x = np.diff(x, axis = 0, n = self.n_diff)
 
         # Convert to tensors, normalize
-        x = torch.tensor(x)  # [seq_len, 2]
+        x = torch.tensor(x, dtype = self.dtype)  # [seq_len, 2]
         if self.normalize['x'] is not None:
             x = self.normalize['x'](x)
 
         # 'norm_cap' means that capacity is normalized to capacity at zero cycle,
         # but 'norm_cap' is not scaled by mean and std of dataset
-        y = torch.tensor(row['norm_cap'], dtype=torch.float32)  # scalar
+        y = torch.tensor(row['norm_cap'], dtype=self.dtype)  # scalar
         if self.normalize['y'] is not None:
             y = self.normalize['y'](y)
 
@@ -376,7 +378,12 @@ class CompositeBatteryDataset(Dataset):
 # -------------------------------------
 
 class GlobalStatsCalculator:
-    def __init__(self, stat_type: str | None, target: str = 'x'):
+    def __init__(
+            self, 
+            stat_type: str | None, 
+            target: str = 'x',
+            dtype = torch.float32,
+        ):
         """
         Calculate global statistics for normalization.
 
@@ -392,6 +399,7 @@ class GlobalStatsCalculator:
         """
         self.stat_type = stat_type
         self.target = target
+        self.dtype = dtype
         self._validate_parameters()
 
     def _validate_parameters(self):
@@ -420,19 +428,19 @@ class GlobalStatsCalculator:
         """Compute statistics for time series features (x)"""
         device = dataset[0]['x'].device
         stats = {}
-        eps = 1e-8  # Numerical stability
+        eps = 1e-12 if self.dtype == torch.float64 else 1e-8  # Numerical stability
 
         # Initialize accumulators based on stat type
         if self.stat_type in ['minmax_zero_one', 'minmax_symmetric', 'meanimax']:
-            global_min = torch.full((2,), float('inf'), device=device)
-            global_max = torch.full((2,), float('-inf'), device=device)
+            global_min = torch.full((2,), float('inf'), device=device, dtype = self.dtype)
+            global_max = torch.full((2,), float('-inf'), device=device, dtype = self.dtype)
 
         if self.stat_type in ['meanimax', 'meanstd']:
-            total_sum = torch.zeros(2, device=device)
+            total_sum = torch.zeros(2, device=device, dtype = self.dtype)
             total_count = 0
 
         if self.stat_type == 'meanstd':
-            total_sum_sq = torch.zeros(2, device=device)
+            total_sum_sq = torch.zeros(2, device=device, dtype = self.dtype)
 
         # Process samples
         for sample in dataset:
@@ -449,12 +457,12 @@ class GlobalStatsCalculator:
 
             # Track sum/count for mean-based statistics
             if self.stat_type in ['meanimax', 'meanstd']:
-                total_sum += torch.sum(x, dim=0)
+                total_sum += torch.sum(x, dim=0, dtype=self.dtype)
                 total_count += x.shape[0]
 
             # Track sum of squares for std calculation
             if self.stat_type == 'meanstd':
-                total_sum_sq += torch.sum(x ** 2, dim=0)
+                total_sum_sq += torch.sum(x ** 2, dim=0, dtype=self.dtype)
 
         # Calculate final statistics
         if self.stat_type.startswith('minmax'):
@@ -470,13 +478,15 @@ class GlobalStatsCalculator:
                 scale = half_range
 
         elif self.stat_type == 'meanimax':
-            global_mean = total_sum / total_count if total_count > 0 else torch.zeros(2, device=device)
+            global_mean = total_sum / total_count if total_count > 0 \
+                else torch.zeros(2, device=device, dtype=self.dtype)
             stats = {'mean': global_mean, 'min': global_min, 'max': global_max}
             bias = global_mean
             scale = torch.maximum(global_mean.abs(), global_max) + eps
 
         elif self.stat_type == 'meanstd':
-            global_mean = total_sum / total_count if total_count > 0 else torch.zeros(2, device=device)
+            global_mean = total_sum / total_count if total_count > 0 \
+                else torch.zeros(2, device=device, dtype=self.dtype)
             global_var = (total_sum_sq / total_count) - (global_mean ** 2) + eps
             global_std = torch.sqrt(global_var)
             stats = {'mean': global_mean, 'std': global_std}
@@ -488,7 +498,7 @@ class GlobalStatsCalculator:
     def _compute_y_stats(self, dataset):
         """Compute statistics for scalar targets (y)"""
         y = torch.cat([sample['y'].unsqueeze(0) for sample in dataset])
-        eps = 1e-8
+        eps = 1e-12 if self.dtype == torch.float64 else 1e-8
         stats = {}
 
         if self.stat_type.startswith('minmax'):
@@ -531,6 +541,7 @@ class DataSetCreation:
             segment_params: dict | None = None,  # Параметры сегментации
             #SingleSegmented = CachedSegmentedBatteryDataset,
             SingleSegmented = SegmentedSingleBatteryDataset,
+            dtype = torch.float32,
         ):
         self.info = info
         self.Single = Single
@@ -547,6 +558,8 @@ class DataSetCreation:
 
         self.segment_params = segment_params
         self.SingleSegmented = SingleSegmented
+
+        self.dtype = dtype
 
         self.denormalize = {'x': None, 'y': None}
         self.dataset = None
@@ -607,12 +620,14 @@ supported for \'normalization_types\' argument')
         x_stats_calculator = self.StatsCalculator(
                 stat_type = self.normalization_types['x'],
                 target = 'x',
+                dtype = self.dtype,
             )
         x_stats, x_bias, x_scale = x_stats_calculator.compute(dataset)
 
         y_stats_calculator = self.StatsCalculator(
                 stat_type = self.normalization_types['y'],
                 target = 'y',
+                dtype=self.dtype,
             )
         y_stats, y_bias, y_scale = y_stats_calculator.compute(dataset)
 
@@ -624,29 +639,29 @@ supported for \'normalization_types\' argument')
 
         # Handle minmax_symmetric case properly
         if self.normalization_types['x'] == 'minmax_symmetric':
-            self.normalize['x'] = lambda x: (x - x_bias) / x_scale
-            self.denormalize['x'] = lambda x: x * x_scale + x_bias
+            self.normalize['x'] = lambda x: (x - x_bias.to(x.device)) / x_scale.to(x.device)
+            self.denormalize['x'] = lambda x: x * x_scale.to(x.device) + x_bias.to(x.device)
         else:
-            self.normalize['x'] = lambda x: (x - x_bias) / x_scale
-            self.denormalize['x'] = lambda x: x * x_scale + x_bias
+            self.normalize['x'] = lambda x: (x - x_bias.to(x.device)) / x_scale.to(x.device)
+            self.denormalize['x'] = lambda x: x * x_scale.to(x.device) + x_bias.to(x.device)
 
         if self.normalization_types['y'] == 'minmax_symmetric':
-            self.normalize['y'] = lambda y: (y - y_bias) / y_scale
-            self.denormalize['y'] = lambda y: y * y_scale + y_bias
+            self.normalize['y'] = lambda y: (y - y_bias.to(y.device)) / y_scale.to(y.device)
+            self.denormalize['y'] = lambda y: y * y_scale.to(y.device) + y_bias.to(y.device)
         else:
-            self.normalize['y'] = lambda y: (y - y_bias) / y_scale
-            self.denormalize['y'] = lambda y: y * y_scale + y_bias
+            self.normalize['y'] = lambda y: (y - y_bias.to(y.device)) / y_scale.to(y.device)
+            self.denormalize['y'] = lambda y: y * y_scale.to(y.device) + y_bias.to(y.device)
 
         self.stats['x'] = x_stats
         self.stats['y'] = y_stats
 
         # Test normalization round-trip
-        test_x = torch.randn(10, 2)
+        test_x = torch.randn(10, 2, dtype=self.dtype)
         norm_x = self.normalize['x'](test_x)
         denorm_x = self.denormalize['x'](norm_x)
         assert torch.allclose(test_x, denorm_x, atol=1e-6), "X normalization round-trip failed"
 
-        test_y = torch.randn(1)
+        test_y = torch.randn(1, dtype=self.dtype)
         norm_y = self.normalize['y'](test_y)
         denorm_y = self.denormalize['y'](norm_y)
         assert torch.allclose(test_y, denorm_y, atol=1e-6), "Y normalization round-trip failed"

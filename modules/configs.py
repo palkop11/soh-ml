@@ -1,8 +1,9 @@
 # TEST CONFIGURATION for single experiment
 test_config = {
-    'experiment_name': 'testing_on_small_segmented', # also used for TensorBoard logging
+    'experiment_name': 'testing_on_small_64', # also used for TensorBoard logging
     'seed': 42,
 
+    'precision': 'float64',
     'data': {
         'datadir':'./DATA/dataset_v5_ts_npz/',
         'train': [
@@ -18,7 +19,7 @@ test_config = {
         'normalization': {'x': None, 'y': 'minmax_zero_one'},
         'n_diff': 0,
         'segment_params': {
-            'segment_length': 379,
+            'segment_length': None,
             'overlap': 0, 
             'drop_last':True,
         }
@@ -27,18 +28,18 @@ test_config = {
     'model': {
         'input_size': 2,
 
-        'cnn_channels': [4, 16, 64],  # Last element can be final channel dim
-        'cnn_kernel_sizes': [3, 3, 3], # None for default
-        'cnn_strides': [1, 2, 2], # None for default
-        'cnn_paddings': [1, 1, 1], # None for default
-        'cnn_use_maxpool': [False, True, True],  # List of booleans for maxpool per block
+        'cnn_channels': [8, 16, 32, 64],  # Last element can be final channel dim
+        'cnn_kernel_sizes': [3, 5, 7, 7], # None for default
+        'cnn_strides': [1, 2, 2, 2], # None for default
+        'cnn_paddings': [1, 1, 1, 2], # None for default
+        'cnn_use_maxpool': [False, True, True, True],  # List of booleans for maxpool per block
 
-        'lstm_hidden_size': 64,
-        'num_layers': 2,
+        'lstm_hidden_size': 128,
+        'num_layers': 1,
 
         'output_size': 1,
-        'dropout_prob': 0.4,
-        'regressor_hidden_dim': 1024,
+        'dropout_prob': 0.25,
+        'regressor_hidden_dim': 256,
         'output_activation': 'sigmoid',
     },
 
@@ -51,13 +52,13 @@ test_config = {
         'batch_size': 32,
         'learning_rate': 1e-3,
         'scheduler_parameters': {
-            'scheduler_type': None,
+            'scheduler_type': 'cosine',
             'plateau_factor': 0.5,
             'plateau_patience': 5,
-            'cosine_t_max': 10,
+            'cosine_t_max': 25,
         },
         'loss_type': 'huber1.0',
-        'epochs': 50,
+        'epochs': 200,
         'accelerator': 'auto',
         'devices': 1,
     },
